@@ -5,9 +5,28 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>フリックボール - ステージチャレンジ（スマホ対応）</title>
 <style>
-  html,body{height:100%;margin:0;overflow:hidden;background:#cfefff;}
-  canvas{display:block;background:linear-gradient(#dff,#9ef);touch-action:none;}
-  #ui{position:fixed;top:10px;right:10px;padding:10px;background:#fff;border-radius:8px;box-shadow:0 0 8px rgba(0,0,0,0.2);font-family:sans-serif;}
+  html,body{
+    height:100%;
+    margin:0;
+    overflow:hidden;
+    background:#cfefff;
+    touch-action:none; /* スマホでのスクロール・ズームを禁止 */
+  }
+  canvas{
+    display:block;
+    background:linear-gradient(#dff,#9ef);
+    touch-action:none;
+  }
+  #ui{
+    position:fixed;
+    top:10px;
+    right:10px;
+    padding:10px;
+    background:#fff;
+    border-radius:8px;
+    box-shadow:0 0 8px rgba(0,0,0,0.2);
+    font-family:sans-serif;
+  }
   #ui h3{margin:0 0 6px;font-size:14px;}
   #ui label{display:block;font-size:12px;margin-top:6px;}
   #ui input{width:160px;}
@@ -35,7 +54,8 @@
 <script>
 const canvas=document.getElementById('c');
 const ctx=canvas.getContext('2d');
-canvas.width=900;canvas.height=600;
+canvas.width=900;
+canvas.height=600;
 
 // ----- 物理パラメータ -----
 let gravity=1200,velocityMultiplier=1.0;
@@ -89,11 +109,15 @@ let pointer={active:false,sx:0,sy:0,st:0,ex:0,ey:0};
 function getCanvasPos(e){
   const rect=canvas.getBoundingClientRect();
   if(e.touches && e.touches.length>0){
-    return {x:(e.touches[0].clientX-rect.left)*(canvas.width/rect.width),
-            y:(e.touches[0].clientY-rect.top)*(canvas.height/rect.height)};
+    return {
+      x:(e.touches[0].clientX-rect.left)*(canvas.width/rect.width),
+      y:(e.touches[0].clientY-rect.top)*(canvas.height/rect.height)
+    };
   }
-  return {x:(e.clientX-rect.left)*(canvas.width/rect.width),
-          y:(e.clientY-rect.top)*(canvas.height/rect.height)};
+  return {
+    x:(e.clientX-rect.left)*(canvas.width/rect.width),
+    y:(e.clientY-rect.top)*(canvas.height/rect.height)
+  };
 }
 
 function startPointer(e){
@@ -114,7 +138,7 @@ function endPointer(e){
   const dt=(performance.now()-pointer.st)/1000;
   const dx=(pointer.ex||pointer.sx)-pointer.sx;
   const dy=(pointer.ey||pointer.sy)-pointer.sy;
-  if(dt>0.05){ // フリック動作
+  if(dt>0.05){
     state.ball.vx=(dx/dt)*velocityMultiplier*0.8;
     state.ball.vy=(dy/dt)*velocityMultiplier*0.8;
     state.launched=true;
@@ -170,34 +194,29 @@ function draw(cameraX){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const offset=-cameraX;
 
-  // 背景
   ctx.fillStyle='#bdefff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // 障害物
   ctx.fillStyle='#8a5a3b';
   for(const o of state.obstacles) ctx.fillRect(o.x+offset,o.y,o.w,o.h);
 
-  // 敵
   for(const en of state.enemies){
     ctx.fillStyle='#e74c3c';
     ctx.fillRect(en.x+offset,en.y,en.w,en.h);
   }
 
-  // ゴール
   ctx.fillStyle=state.finished?'#2ecc71':'#4caf50';
   ctx.fillRect(state.goal.x+offset,state.goal.y,state.goal.w,state.goal.h);
   ctx.fillStyle='#fff';
-  ctx.font='18px sans-serif';ctx.textAlign='center';
+  ctx.font='18px sans-serif';
+  ctx.textAlign='center';
   ctx.fillText('GOAL',state.goal.x+offset+state.goal.w/2,state.goal.y+state.goal.h/2+6);
 
-  // ボール
   const b=state.ball;
   ctx.beginPath();
   ctx.arc(b.x+offset,b.y,b.r,0,Math.PI*2);
   ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#0003';ctx.stroke();
 
-  // フリック方向ガイド（ドラッグ中）
   if(pointer.active){
     ctx.strokeStyle='rgba(0,0,0,0.3)';
     ctx.beginPath();
@@ -206,7 +225,6 @@ function draw(cameraX){
     ctx.stroke();
   }
 
-  // 状態表示
   const status=document.getElementById('status');
   if(state.finished){status.textContent='CLEAR!!';status.style.color='green';}
   else if(state.gameover){status.textContent='GAME OVER';status.style.color='red';}
@@ -214,6 +232,7 @@ function draw(cameraX){
 }
 
 // ----- メインループ -----
+let cameraX=0;
 function step(now){
   const dt=Math.min((now-state.lastTime)/1000,1/15);
   state.lastTime=now;
@@ -250,7 +269,11 @@ function step(now){
     if(checkGoal(b,state.goal)){state.finished=true;state.launched=false;}
   }
 
-  const cameraX=Math.max(0,Math.min(b.x-canvas.width/2,WORLD_WIDTH-canvas.width));
+  // === カメラ追尾（ボールが常に画面内） ===
+  const targetX = b.x - canvas.width * 0.4; // ボールより少し先を見せる
+  cameraX += (targetX - cameraX) * 0.1;     // スムーズ追尾
+  cameraX = Math.max(0, Math.min(cameraX, WORLD_WIDTH - canvas.width));
+
   draw(cameraX);
   requestAnimationFrame(step);
 }
