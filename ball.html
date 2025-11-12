@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>フリックでゴール！ - HTML5 Canvas ゲーム</title>
+<style>
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif}
+#ui{position:fixed;right:12px;top:12px;z-index:30;background:rgba(255,255,255,0.95);backdrop-filter:blur(6px);padding:10px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+#ui h3{margin:0 0 8px 0;font-size:14px}
+#ui button{display:block;width:100%;margin-top:6px;padding:8px;border-radius:6px;border:1px solid #ddd;background:#fff}
+canvas{display:block;background:linear-gradient(#dff,#9ef);touch-action:none}
+.legend{font-size:12px;margin-top:6px}
+.small{font-size:12px;color:#444}
+label{display:block;font-size:12px;margin-top:6px}
+input[type=range]{width:160px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+<h3>フリックでゴール！</h3>
+<div class="small">指（またはマウス）でボールをフリックしてゴールに入れよう。</div>
+<div class="legend">ゴール: 緑 / 障害物: 茶色 / ボール: 白</div>
+<label>重力: <span id="gravVal">1200</span> px/s²</label>
+<input id="grav" type="range" min="200" max="3000" value="1200">
+<label>速度倍率: <span id="velVal">1.0</span></label>
+<input id="vel" type="range" min="0.2" max="3.0" step="0.05" value="1.0">
+<button id="reset">リセット</button>
+<button id="randomize">障害物ランダム</button>
+<div class="small" style="margin-top:8px">障害物は <code>OBSTACLES</code> 配列で JavaScript 上から編集できます。</div>
+</div>
+
+
+<script>
+// ----------------------------
+// 設定 (ここを編集して障害物を追加/変更できます)
+// 各障害物は {x,y,w,h}（キャンバス座標）で矩形を定義します。
+// ゴールは {x,y,w,h} で定義。ボールは startPos に初期位置を設定。
+// ----------------------------
+
+
+const CONFIG = {
+width: 900, // 初期キャンバス幅（レスポンシブで拡大/縮小します）
+height: 600,
+ballRadius: 18,
+startPos: {x:120, y:80},
+// 障害物の配列（編集可）
+OBSTACLES: [
+{x:220,y:320,w:300,h:24},
+{x:120,y:200,w:150,h:20},
+{x:520,y:240,w:240,h:20},
+{x:420,y:440,w:320,h:20}
+],
+// ゴール（ここにボールが入ればクリア）
+GOAL: {x:760,y:520,w:100,h:60}
+};
+
+
+// ----------------------------
+// 物理パラメータ
+// ----------------------------
+let gravity = 1200; // px / s^2 (UIで変更可能)
+let velocityMultiplier = 1.0; // フリック速度にかける倍率
+
+
+// ----------------------------
+// Canvas と描画
+// ----------------------------
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+
+function resize() {
+// ビューポート幅に合わせてキャンバスを拡大縮小（デザイン解像度を保つ）
+const scale = Math.min(window.innerWidth / CONFIG.width, window.innerHeight / CONFIG.height);
+canvas.style.width = Math.round(CONFIG.width * scale) + 'px';
+canvas.style.height = Math.round(CONFIG.height * scale) + 'px';
+canvas.width = CONFIG.width;
+</html>
