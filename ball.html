@@ -1,80 +1,196 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>フリックでゴール！ - HTML5 Canvas ゲーム</title>
-<style>
-html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif}
-#ui{position:fixed;right:12px;top:12px;z-index:30;background:rgba(255,255,255,0.95);backdrop-filter:blur(6px);padding:10px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12)}
-#ui h3{margin:0 0 8px 0;font-size:14px}
-#ui button{display:block;width:100%;margin-top:6px;padding:8px;border-radius:6px;border:1px solid #ddd;background:#fff}
-canvas{display:block;background:linear-gradient(#dff,#9ef);touch-action:none}
-.legend{font-size:12px;margin-top:6px}
-.small{font-size:12px;color:#444}
-label{display:block;font-size:12px;margin-top:6px}
-input[type=range]{width:160px}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>フリックでゴール！</title>
+  <style>
+    html,body{height:100%;margin:0;overflow:hidden;background:#cfefff;}
+    canvas{display:block;background:linear-gradient(#dff,#9ef);touch-action:none;}
+    #ui{position:fixed;top:10px;right:10px;padding:10px;background:#fff;border-radius:8px;box-shadow:0 0 8px rgba(0,0,0,0.2);font-family:sans-serif;}
+    #ui h3{margin:0 0 6px;font-size:14px;}
+    #ui label{display:block;font-size:12px;margin-top:6px;}
+    #ui input{width:160px;}
+    #ui button{margin-top:8px;width:100%;padding:6px;}
+  </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="ui">
-<h3>フリックでゴール！</h3>
-<div class="small">指（またはマウス）でボールをフリックしてゴールに入れよう。</div>
-<div class="legend">ゴール: 緑 / 障害物: 茶色 / ボール: 白</div>
-<label>重力: <span id="gravVal">1200</span> px/s²</label>
-<input id="grav" type="range" min="200" max="3000" value="1200">
-<label>速度倍率: <span id="velVal">1.0</span></label>
-<input id="vel" type="range" min="0.2" max="3.0" step="0.05" value="1.0">
-<button id="reset">リセット</button>
-<button id="randomize">障害物ランダム</button>
-<div class="small" style="margin-top:8px">障害物は <code>OBSTACLES</code> 配列で JavaScript 上から編集できます。</div>
-</div>
+  <canvas id="c"></canvas>
 
+  <div id="ui">
+    <h3>フリックでゴール！</h3>
+    <label>重力: <span id="gravVal">1200</span></label>
+    <input id="grav" type="range" min="200" max="3000" value="1200">
+    <label>速度倍率: <span id="velVal">1.0</span></label>
+    <input id="vel" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
+    <button id="reset">リセット</button>
+    <button id="randomize">障害物ランダム</button>
+  </div>
 
-<script>
-// ----------------------------
-// 設定 (ここを編集して障害物を追加/変更できます)
-// 各障害物は {x,y,w,h}（キャンバス座標）で矩形を定義します。
-// ゴールは {x,y,w,h} で定義。ボールは startPos に初期位置を設定。
-// ----------------------------
+  <script>
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let gravity = 1200, velocityMultiplier = 1.0;
 
+  const CONFIG = {
+    width: 900, height: 600,
+    ballRadius: 18,
+    startPos: {x:120, y:80},
+    OBSTACLES: [
+      {x:220,y:320,w:300,h:24},
+      {x:120,y:200,w:150,h:20},
+      {x:520,y:240,w:240,h:20},
+      {x:420,y:440,w:320,h:20}
+    ],
+    GOAL: {x:760,y:520,w:100,h:60}
+  };
 
-const CONFIG = {
-width: 900, // 初期キャンバス幅（レスポンシブで拡大/縮小します）
-height: 600,
-ballRadius: 18,
-startPos: {x:120, y:80},
-// 障害物の配列（編集可）
-OBSTACLES: [
-{x:220,y:320,w:300,h:24},
-{x:120,y:200,w:150,h:20},
-{x:520,y:240,w:240,h:20},
-{x:420,y:440,w:320,h:20}
-],
-// ゴール（ここにボールが入ればクリア）
-GOAL: {x:760,y:520,w:100,h:60}
-};
+  const state = {
+    ball:{x:CONFIG.startPos.x,y:CONFIG.startPos.y,r:CONFIG.ballRadius,vx:0,vy:0},
+    obstacles: JSON.parse(JSON.stringify(CONFIG.OBSTACLES)),
+    goal: {...CONFIG.GOAL},
+    launched:false,
+    finished:false,
+    lastTime:performance.now()
+  };
 
+  function resize(){
+    canvas.width = CONFIG.width;
+    canvas.height = CONFIG.height;
+  }
+  window.addEventListener('resize', resize);
+  resize();
 
-// ----------------------------
-// 物理パラメータ
-// ----------------------------
-let gravity = 1200; // px / s^2 (UIで変更可能)
-let velocityMultiplier = 1.0; // フリック速度にかける倍率
+  // --- 入力 ---
+  let pointer = {down:false,sx:0,sy:0,st:0};
+  function getPointerPos(e){
+    if(e.touches && e.touches[0]) return {x:e.touches[0].clientX,y:e.touches[0].clientY};
+    if(e.clientX!==undefined) return {x:e.clientX,y:e.clientY};
+    return null;
+  }
+  function pageToCanvas(pos){
+    const rect = canvas.getBoundingClientRect();
+    const x = (pos.x - rect.left) * (canvas.width / rect.width);
+    const y = (pos.y - rect.top) * (canvas.height / rect.height);
+    return {x,y};
+  }
 
+  function pointerDown(e){
+    const p0 = getPointerPos(e);
+    if(!p0) return;
+    const p = pageToCanvas(p0);
+    pointer.down=true; pointer.sx=p.x; pointer.sy=p.y; pointer.st=performance.now();
+  }
 
-// ----------------------------
-// Canvas と描画
-// ----------------------------
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
+  function pointerUp(e){
+    if(!pointer.down) return;
+    const p0 = getPointerPos(e);
+    if(!p0) { pointer.down=false; return; }
+    const p = pageToCanvas(p0);
+    const dt = (performance.now()-pointer.st)/1000;
+    if(dt>0){
+      const dx = p.x-pointer.sx, dy = p.y-pointer.sy;
+      state.ball.vx = (dx/dt)*velocityMultiplier*0.8;
+      state.ball.vy = (dy/dt)*velocityMultiplier*0.8;
+      state.launched=true;
+    }
+    pointer.down=false;
+  }
 
+  canvas.addEventListener('mousedown',pointerDown);
+  window.addEventListener('mouseup',pointerUp);
+  canvas.addEventListener('touchstart',pointerDown,{passive:false});
+  canvas.addEventListener('touchend',pointerUp,{passive:false});
 
-function resize() {
-// ビューポート幅に合わせてキャンバスを拡大縮小（デザイン解像度を保つ）
-const scale = Math.min(window.innerWidth / CONFIG.width, window.innerHeight / CONFIG.height);
-canvas.style.width = Math.round(CONFIG.width * scale) + 'px';
-canvas.style.height = Math.round(CONFIG.height * scale) + 'px';
-canvas.width = CONFIG.width;
+  function circleRectCollision(ball,rect){
+    const cx=Math.max(rect.x,Math.min(ball.x,rect.x+rect.w));
+    const cy=Math.max(rect.y,Math.min(ball.y,rect.y+rect.h));
+    const dx=ball.x-cx, dy=ball.y-cy;
+    const dist2=dx*dx+dy*dy;
+    if(dist2<ball.r*ball.r){
+      const dist=Math.sqrt(dist2)||0.0001;
+      const nx=dx/dist, ny=dy/dist;
+      const penetration=ball.r-dist;
+      return {hit:true,nx,ny,penetration};
+    }
+    return {hit:false};
+  }
+
+  function resolveCollision(ball,rect){
+    const col=circleRectCollision(ball,rect);
+    if(!col.hit)return;
+    ball.x+=col.nx*col.penetration;
+    ball.y+=col.ny*col.penetration;
+    const speed=ball.vx*col.nx+ball.vy*col.ny;
+    const restitution=0.5;
+    const impulse=-(1+restitution)*speed;
+    ball.vx+=impulse*col.nx;
+    ball.vy+=impulse*col.ny;
+  }
+
+  function checkGoal(b,g){return(b.x>g.x&&b.x<g.x+g.w&&b.y>g.y&&b.y<g.y+g.h);}
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // 障害物
+    ctx.fillStyle='#8a5a3b';
+    for(const o of state.obstacles) ctx.fillRect(o.x,o.y,o.w,o.h);
+    // ゴール
+    ctx.fillStyle=state.finished?'#2ecc71':'#4caf50';
+    ctx.fillRect(state.goal.x,state.goal.y,state.goal.w,state.goal.h);
+    ctx.fillStyle='#fff';
+    ctx.font='18px sans-serif';
+    ctx.textAlign='center';
+    ctx.fillText('GOAL',state.goal.x+state.goal.w/2,state.goal.y+state.goal.h/2+6);
+    // ボール
+    const b=state.ball;
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+    ctx.fillStyle='#fff';
+    ctx.fill();
+    ctx.strokeStyle='#0003';
+    ctx.stroke();
+  }
+
+  function step(now){
+    const dt=Math.min((now-state.lastTime)/1000,1/15);
+    state.lastTime=now;
+    const b=state.ball;
+    if(state.launched&&!state.finished){
+      b.vy+=gravity*dt;
+      b.x+=b.vx*dt; b.y+=b.vy*dt;
+      if(b.x-b.r<0){b.x=b.r;b.vx=-b.vx*0.6;}
+      if(b.x+b.r>canvas.width){b.x=canvas.width-b.r;b.vx=-b.vx*0.6;}
+      if(b.y-b.r<0){b.y=b.r;b.vy=-b.vy*0.6;}
+      if(b.y+b.r>canvas.height){b.y=canvas.height-b.r;b.vy=-b.vy*0.5;}
+      for(const o of state.obstacles) resolveCollision(b,o);
+      b.vx*=0.999; b.vy*=0.999;
+      if(checkGoal(b,state.goal)){state.finished=true;state.launched=false;}
+    }
+    draw();
+    requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+
+  // --- UI ---
+  document.getElementById('grav').oninput=e=>{
+    gravity=+e.target.value;
+    document.getElementById('gravVal').textContent=gravity;
+  };
+  document.getElementById('vel').oninput=e=>{
+    velocityMultiplier=+e.target.value;
+    document.getElementById('velVal').textContent=velocityMultiplier.toFixed(1);
+  };
+  document.getElementById('reset').onclick=()=>{
+    state.ball={x:CONFIG.startPos.x,y:CONFIG.startPos.y,r:CONFIG.ballRadius,vx:0,vy:0};
+    state.finished=false;state.launched=false;
+  };
+  document.getElementById('randomize').onclick=()=>{
+    const obs=[];
+    for(let i=0;i<4;i++){const w=100+Math.random()*200,h=20+Math.random()*20,x=Math.random()*(canvas.width-w),y=Math.random()*(canvas.height-200)+100;obs.push({x,y,w,h});}
+    state.obstacles=obs;
+  };
+  </script>
+</body>
 </html>
