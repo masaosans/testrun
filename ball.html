@@ -12,7 +12,7 @@
   #ui label{display:block;font-size:12px;margin-top:6px;}
   #ui input{width:160px;}
   #ui button{margin-top:8px;width:100%;padding:6px;}
-  #counter{margin-top:6px;font-size:13px;font-weight:bold;}
+  #counter,#stageLabel{margin-top:6px;font-size:13px;font-weight:bold;}
   #status{margin-top:6px;font-size:14px;font-weight:bold;text-align:center;}
 </style>
 </head>
@@ -21,12 +21,14 @@
 
   <div id="ui">
     <h3>フリックボール</h3>
+    <div id="stageLabel">ステージ：1</div>
     <div id="counter">フリック回数：0</div>
     <label>重力: <span id="gravVal">1200</span></label>
     <input id="grav" type="range" min="200" max="3000" value="1200">
     <label>速度倍率: <span id="velVal">1.0</span></label>
     <input id="vel" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
     <button id="reset">リセット</button>
+    <button id="next">次のステージ</button>
     <div id="status"></div>
   </div>
 
@@ -35,47 +37,72 @@ const canvas=document.getElementById('c');
 const ctx=canvas.getContext('2d');
 canvas.width=900;canvas.height=600;
 
-// --- パラメータ ---
 let gravity=1200,velocityMultiplier=1.0;
-const WORLD_WIDTH=2000; // ステージ横幅
+const WORLD_WIDTH=2000;
+const groundFriction=0.85;   // 地面上の摩擦
+const airResistance=0.995;   // 空中抵抗
 
-const CONFIG={
-  ballRadius:18,
-  startPos:{x:80,y:550},
-  OBSTACLES:[
-    {x:300,y:500,w:200,h:20},
-    {x:700,y:420,w:180,h:20},
-    {x:1100,y:360,w:220,h:20},
-    {x:1400,y:480,w:260,h:20}
-  ],
-  GOAL:{x:1850,y:500,w:100,h:60},
-  ENEMIES:[
-    {x:500,y:480,w:40,h:40,range:100,speed:80,dir:1},
-    {x:1200,y:340,w:40,h:40,range:120,speed:100,dir:-1}
-  ]
-};
+// --- ステージ定義 ---
+const STAGES=[
+  {
+    OBSTACLES:[
+      {x:300,y:500,w:200,h:20},
+      {x:700,y:420,w:180,h:20},
+      {x:1100,y:360,w:220,h:20},
+      {x:1400,y:480,w:260,h:20}
+    ],
+    ENEMIES:[
+      {x:500,y:480,w:40,h:40,range:100,speed:80,dir:1},
+      {x:1200,y:340,w:40,h:40,range:120,speed:100,dir:-1}
+    ],
+    GOAL:{x:1850,y:500,w:100,h:60}
+  },
+  {
+    OBSTACLES:[
+      {x:250,y:500,w:150,h:20},
+      {x:600,y:420,w:120,h:20},
+      {x:850,y:320,w:180,h:20},
+      {x:1250,y:400,w:220,h:20},
+      {x:1600,y:480,w:250,h:20}
+    ],
+    ENEMIES:[
+      {x:700,y:400,w:40,h:40,range:80,speed:100,dir:1},
+      {x:1450,y:370,w:40,h:40,range:140,speed:90,dir:-1},
+      {x:1750,y:460,w:40,h:40,range:80,speed:70,dir:1}
+    ],
+    GOAL:{x:1850,y:480,w:100,h:60}
+  },
+  {
+    OBSTACLES:[
+      {x:300,y:480,w:200,h:20},
+      {x:800,y:400,w:150,h:20},
+      {x:1000,y:300,w:100,h:20},
+      {x:1300,y:350,w:200,h:20},
+      {x:1600,y:480,w:280,h:20}
+    ],
+    ENEMIES:[
+      {x:600,y:460,w:40,h:40,range:100,speed:90,dir:1},
+      {x:1200,y:280,w:40,h:40,range:150,speed:120,dir:-1},
+      {x:1650,y:460,w:40,h:40,range:100,speed:70,dir:1}
+    ],
+    GOAL:{x:1850,y:480,w:100,h:60}
+  }
+];
 
 // --- 状態 ---
+let currentStage=0;
 const state={
-  ball:{x:CONFIG.startPos.x,y:CONFIG.startPos.y,vx:0,vy:0,r:CONFIG.ballRadius},
-  obstacles:JSON.parse(JSON.stringify(CONFIG.OBSTACLES)),
-  goal:{...CONFIG.GOAL},
-  enemies:JSON.parse(JSON.stringify(CONFIG.ENEMIES)),
-  launched:false,finished:false,gameover:false,lastTime:performance.now(),
-  shots:0
+  ball:{x:80,y:550,vx:0,vy:0,r:18},
+  obstacles:[],
+  enemies:[],
+  goal:null,
+  launched:false,finished:false,gameover:false,lastTime:performance.now(),shots:0
 };
 
 // --- 入力 ---
 let pointer={down:false,sx:0,sy:0,st:0};
-function getPointerPos(e){
-  if(e.touches&&e.touches[0])return{x:e.touches[0].clientX,y:e.touches[0].clientY};
-  if(e.clientX!==undefined)return{x:e.clientX,y:e.clientY};
-  return null;
-}
-function pageToCanvas(pos){
-  const rect=canvas.getBoundingClientRect();
-  return{x:(pos.x-rect.left)*(canvas.width/rect.width),y:(pos.y-rect.top)*(canvas.height/rect.height)};
-}
+function getPointerPos(e){if(e.touches&&e.touches[0])return{x:e.touches[0].clientX,y:e.touches[0].clientY};if(e.clientX!==undefined)return{x:e.clientX,y:e.clientY};return null;}
+function pageToCanvas(pos){const rect=canvas.getBoundingClientRect();return{x:(pos.x-rect.left)*(canvas.width/rect.width),y:(pos.y-rect.top)*(canvas.height/rect.height)};}
 function pointerDown(e){
   if(state.finished||state.gameover)return;
   const p0=getPointerPos(e);if(!p0)return;
@@ -118,7 +145,7 @@ function circleRectCollision(ball,rect){
 }
 function resolveCollision(ball,rect){
   const col=circleRectCollision(ball,rect);
-  if(!col.hit)return;
+  if(!col.hit)return false;
   ball.x+=col.nx*col.penetration;
   ball.y+=col.ny*col.penetration;
   const speed=ball.vx*col.nx+ball.vy*col.ny;
@@ -126,6 +153,7 @@ function resolveCollision(ball,rect){
   const impulse=-(1+restitution)*speed;
   ball.vx+=impulse*col.nx;
   ball.vy+=impulse*col.ny;
+  return true;
 }
 function checkGoal(b,g){return(b.x>g.x&&b.x<g.x+g.w&&b.y>g.y&&b.y<g.y+g.h);}
 function checkEnemyHit(b,en){
@@ -139,35 +167,28 @@ function checkEnemyHit(b,en){
 function draw(cameraX){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   const offset=-cameraX;
-
-  // 背景
   ctx.fillStyle='#bdefff';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // 障害物
   ctx.fillStyle='#8a5a3b';
   for(const o of state.obstacles) ctx.fillRect(o.x+offset,o.y,o.w,o.h);
 
-  // 敵
   for(const en of state.enemies){
     ctx.fillStyle='#e74c3c';
     ctx.fillRect(en.x+offset,en.y,en.w,en.h);
   }
 
-  // ゴール
   ctx.fillStyle=state.finished?'#2ecc71':'#4caf50';
   ctx.fillRect(state.goal.x+offset,state.goal.y,state.goal.w,state.goal.h);
   ctx.fillStyle='#fff';
   ctx.font='18px sans-serif';ctx.textAlign='center';
   ctx.fillText('GOAL',state.goal.x+offset+state.goal.w/2,state.goal.y+state.goal.h/2+6);
 
-  // ボール
   const b=state.ball;
   ctx.beginPath();
   ctx.arc(b.x+offset,b.y,b.r,0,Math.PI*2);
   ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#0003';ctx.stroke();
 
-  // 状態表示
   const status=document.getElementById('status');
   if(state.finished){status.textContent='CLEAR!!';status.style.color='green';}
   else if(state.gameover){status.textContent='GAME OVER';status.style.color='red';}
@@ -179,15 +200,23 @@ function step(now){
   const dt=Math.min((now-state.lastTime)/1000,1/15);
   state.lastTime=now;
   const b=state.ball;
+
   if(state.launched&&!state.finished&&!state.gameover){
     b.vy+=gravity*dt;
     b.x+=b.vx*dt; b.y+=b.vy*dt;
+
+    // 壁・床
     if(b.x-b.r<0){b.x=b.r;b.vx=-b.vx*0.6;}
     if(b.x+b.r>WORLD_WIDTH){b.x=WORLD_WIDTH-b.r;b.vx=-b.vx*0.6;}
     if(b.y-b.r<0){b.y=b.r;b.vy=-b.vy*0.6;}
     if(b.y+b.r>canvas.height){b.y=canvas.height-b.r;b.vy=-b.vy*0.5;}
 
-    for(const o of state.obstacles)resolveCollision(b,o);
+    // 衝突（摩擦フラグ）
+    let onGround=false;
+    for(const o of state.obstacles){
+      const hit=resolveCollision(b,o);
+      if(hit && b.y < o.y) onGround=true;
+    }
 
     // 敵の移動と当たり判定
     for(const en of state.enemies){
@@ -196,19 +225,40 @@ function step(now){
       if(checkEnemyHit(b,en)){state.gameover=true;}
     }
 
-    b.vx*=0.999;b.vy*=0.999;
+    // 抵抗
+    if(onGround){
+      b.vx*=groundFriction;
+      if(Math.abs(b.vx)<1)b.vx=0;
+    } else {
+      b.vx*=airResistance;
+      b.vy*=airResistance;
+    }
+
     if(checkGoal(b,state.goal)){state.finished=true;state.launched=false;}
   }
 
-  // カメラ位置（ボール中心）
   const cameraX=Math.max(0,Math.min(b.x-canvas.width/2,WORLD_WIDTH-canvas.width));
   draw(cameraX);
   requestAnimationFrame(step);
 }
 
-// --- 初期化 ---
-for(const en of state.enemies)en.startX=en.x;
+// --- ステージ読込 ---
+function loadStage(n){
+  const s=STAGES[n];
+  if(!s)return;
+  state.obstacles=JSON.parse(JSON.stringify(s.OBSTACLES));
+  state.enemies=JSON.parse(JSON.stringify(s.ENEMIES));
+  for(const en of state.enemies)en.startX=en.x;
+  state.goal={...s.GOAL};
+  state.ball={x:80,y:550,vx:0,vy:0,r:18};
+  state.launched=false;state.finished=false;state.gameover=false;
+  state.shots=0;
+  document.getElementById('counter').textContent='フリック回数：0';
+  document.getElementById('stageLabel').textContent='ステージ：'+(n+1);
+}
+
 requestAnimationFrame(step);
+loadStage(0);
 
 // --- UI ---
 document.getElementById('grav').oninput=e=>{
@@ -219,13 +269,10 @@ document.getElementById('vel').oninput=e=>{
   velocityMultiplier=+e.target.value;
   document.getElementById('velVal').textContent=velocityMultiplier.toFixed(1);
 };
-document.getElementById('reset').onclick=()=>{
-  state.ball={x:CONFIG.startPos.x,y:CONFIG.startPos.y,vx:0,vy:0,r:CONFIG.ballRadius};
-  state.finished=false;state.gameover=false;state.launched=false;
-  state.shots=0;
-  document.getElementById('counter').textContent='フリック回数：0';
-  state.enemies=JSON.parse(JSON.stringify(CONFIG.ENEMIES));
-  for(const en of state.enemies)en.startX=en.x;
+document.getElementById('reset').onclick=()=>loadStage(currentStage);
+document.getElementById('next').onclick=()=>{
+  currentStage=(currentStage+1)%STAGES.length;
+  loadStage(currentStage);
 };
 </script>
 </body>
