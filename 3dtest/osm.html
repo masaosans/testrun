@@ -1,21 +1,22 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>3D City Walk</title>
-<style>
+  <meta charset="UTF-8">
+  <title>3D City Walk</title>
+  <style>
     body { margin: 0; overflow: hidden; }
-</style>
+  </style>
 </head>
 <body>
 
 <!-- Three.js -->
 <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
 
-<!-- OSM Buildings（最新・安定版） -->
-<script src="https://cdn.jsdelivr.net/npm/osmbuildings@4.1.1/dist/osmbuildings.js"></script>
+<!-- OSMBuildings（CDN URL 修正版） -->
+<script src="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.js"></script>
+<link  rel="stylesheet" href="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.css" />
 
-<!-- バーチャルスティック -->
+<!-- バーチャルジョイスティック -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
 
 <script>
@@ -29,23 +30,25 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 ////////////////////////////////////////////////////
-// ★ OSM Buildings マップ生成（※ new OSMBuildings.OB !!）
+// ★ OSMBuildings マップ生成
 ////////////////////////////////////////////////////
-const osmb = new OSMBuildings.OB({
-    baseURL: '',
-    minZoom: 15,
-    maxZoom: 22,
-    zoom: 18,
-    position: { latitude: 35.6812, longitude: 139.7671 }, // 東京駅
-    tilt: 30,
-    rotation: 0
+// “container” モードで body にマップ追加
+const osmb = new OSMBuildings({
+  container: document.body,
+  position: { latitude: 35.6812, longitude: 139.7671 }, // 東京駅
+  zoom: 18,
+  minZoom: 15,
+  maxZoom: 22,
+  tilt: 30,
+  rotation: 0,
+  attribution: '© Data <a href="https://openstreetmap.org/copyright/">OpenStreetMap</a> © Map <a href="https://osmbuildings.org/copyright/">OSM Buildings</a>'
 });
 
-// 描画レイヤーをブラウザに追加
-osmb.appendTo(document.body);
+// 地図タイル（OpenStreetMap）を追加
+osmb.addMapTiles('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
 ////////////////////////////////////////////////////
-// ★ キャラクター（立方体）
+// ★ キャラクター（シンプルな立方体）
 ////////////////////////////////////////////////////
 const playerGeo = new THREE.BoxGeometry(1, 2, 1);
 const playerMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc });
@@ -59,17 +62,17 @@ light.position.set(5, 10, 3);
 scene.add(light);
 
 ////////////////////////////////////////////////////
-// ★ TPS カメラ
+// ★ TPS カメラ（後方・俯瞰）
 ////////////////////////////////////////////////////
 function updateCamera() {
-    const offset = new THREE.Vector3(0, 5, -10);
-    offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
-    camera.position.copy(player.position).add(offset);
-    camera.lookAt(player.position);
+  const offset = new THREE.Vector3(0, 5, -10);
+  offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
+  camera.position.copy(player.position).add(offset);
+  camera.lookAt(player.position);
 }
 
 ////////////////////////////////////////////////////
-// ★ PC 操作
+// ★ キーボード操作
 ////////////////////////////////////////////////////
 const keys = {};
 document.addEventListener("keydown", e => keys[e.key] = true);
@@ -79,17 +82,15 @@ document.addEventListener("keyup",   e => keys[e.key] = false);
 // ★ スマホジョイスティック
 ////////////////////////////////////////////////////
 let joyX = 0, joyY = 0;
-
 const joystick = nipplejs.create({
-    zone: document.body,
-    mode: "static",
-    position: { left: 80, bottom: 80 },
-    color: "white"
+  zone: document.body,
+  mode: "static",
+  position: { left: 80, bottom: 80 },
+  color: "white"
 });
-
 joystick.on("move", (evt, data) => {
-    joyX = data.vector.x;
-    joyY = data.vector.y;
+  joyX = data.vector.x;
+  joyY = data.vector.y;
 });
 joystick.on("end", () => { joyX = 0; joyY = 0; });
 
@@ -97,35 +98,32 @@ joystick.on("end", () => { joyX = 0; joyY = 0; });
 // ★ アニメーションループ
 ////////////////////////////////////////////////////
 function animate() {
-    requestAnimationFrame(animate);
+  requestAnimationFrame(animate);
 
-    let speed = 0.1;
-    let moveX = 0, moveZ = 0;
+  let speed = 0.1;
+  let moveX = 0, moveZ = 0;
 
-    // PC
-    if (keys["w"]) moveZ = -1;
-    if (keys["s"]) moveZ =  1;
-    if (keys["a"]) moveX = -1;
-    if (keys["d"]) moveX =  1;
+  // PC
+  if (keys["w"]) moveZ = -1;
+  if (keys["s"]) moveZ =  1;
+  if (keys["a"]) moveX = -1;
+  if (keys["d"]) moveX =  1;
 
-    // スマホ
-    moveX += joyX;
-    moveZ += joyY;
+  // スマホ
+  moveX += joyX;
+  moveZ += joyY;
 
-    if (moveX !== 0 || moveZ !== 0) {
-        const angle = Math.atan2(moveX, moveZ);
-        player.rotation.y = angle;
-        player.position.x += Math.sin(angle) * speed;
-        player.position.z += Math.cos(angle) * speed;
-    }
+  if (moveX !== 0 || moveZ !== 0) {
+    const angle = Math.atan2(moveX, moveZ);
+    player.rotation.y = angle;
+    player.position.x += Math.sin(angle) * speed;
+    player.position.z += Math.cos(angle) * speed;
+  }
 
-    // TPSカメラ追従
-    updateCamera();
-
-    renderer.render(scene, camera);
+  updateCamera();
+  renderer.render(scene, camera);
 }
 animate();
 </script>
-
 </body>
 </html>
