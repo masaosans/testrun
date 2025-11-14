@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>Three.js - Simple 3D City (No OSMBuildings)</title>
+<style>
+  html,body { height:100%; margin:0; }
+  canvas { display:block; }
+  /* joystick overlay */
+  #info {
+    position: fixed; left: 8px; top: 8px;
+    background: rgba(255,255,255,0.8); padding:6px 8px; border-radius:6px;
+    font-family: sans-serif; font-size:13px;
+  }
+</style>
+</head>
+<body>
+<div id="info">WASD / ジョイスティックで移動</div>
+
+<!-- Three.js -->
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<!-- nipplejs (スマホジョイスティック) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
+<script>
+// ---------------------------
+// Basic Three.js setup
+// ---------------------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// ground
+const groundGeo = new THREE.PlaneGeometry(400, 400);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x7cfc00 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// grid helper for city feeling
+const grid = new THREE.GridHelper(400, 40, 0x444444, 0xdddddd);
+grid.position.y = 0.01;
+scene.add(grid);
+
+// lights
+const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+dir.position.set(30, 60, 10);
+dir.castShadow = true;
+dir.shadow.mapSize.width = 2048;
+dir.shadow.mapSize.height = 2048;
+dir.shadow.camera.left = -100;
+dir.shadow.camera.right = 100;
+dir.shadow.camera.top = 100;
+dir.shadow.camera.bottom = -100;
+scene.add(dir);
+
+const amb = new THREE.AmbientLight(0xffffff, 0.45);
+scene.add(amb);
+
+// ---------------------------
+// Player (simple capsule / box)
+// ---------------------------
+const playerHeight = 1.8;
+const playerGeom = new THREE.BoxGeometry(0.8, playerHeight, 0.8);
+const playerMat = new THREE.MeshStandardMaterial({ color: 0x0077ff });
+const player = new THREE.Mesh(playerGeom, playerMat);
+player.castShadow = true;
+player.position.set(0, playerHeight/2, 0);
+scene.add(player);
+
+// for collision tests, center point only
+const playerBB = new THREE.Box3().setFromObject(player);
+
+// ---------------------------
+// Procedural city: grid of boxes
+// ---------------------------
+const buildings = [];
+const buildingBoxes = []; // bounding boxes
+
+function makeCity(gridSize = 20, spacing = 4, maxH = 40) {
+  const start = - (gridSize/2) * spacing;
+  for (let i = 0; i < gridSize; i++) {
+    for (let j = 0; j < gridSize; j++) {
+      // leave some space around center (player spawn) as plaza
+      const cx = start + i * spacing;
+      const cz = start + j * spacing;
+      const dist = Math.hypot(cx, cz);
+      if (dist < 6) continue; // clear central plaza
+      
+      // random height, occasional taller
+      const h = Math.round((Math.random()*0.9 + (Math.random() < 0.06 ? 1.6 : 0.2)) * maxH);
+      const w = (Math.random()*0.6 + 0.6) * (spacing * 0.8);
+      const d = (Math.random()*0.6 + 0.6) * (spacing * 0.8);
+
+      const geometry = new THREE.BoxGeometry(w, h, d);
+      const shade = 0xaaaaaa - Math.floor(Math.random()*0x222222);
+      const material = new THREE.MeshStandardMaterial({ color: shade });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.position.set(cx, h/2, cz);
+      scene.add(mesh);
+
+      buildings.push(mesh);
+
+      const bb = new THREE.Box3().setFromObject(mesh);
+      buildingBoxes.push(bb);
+    }
+  }
+}
+makeCity(30, 6, 50);
+
+// ---------------------------
+// Camera TPS follow (smooth)
+// ---------------------------
+const camOffset = new THREE.Vector3(0, 6, -10);
+let camTargetPos = new THREE.Vector3();
+camera.position.set(0, 6, -12);
+camera.lookAt(player.position);
+
+// ---------------------------
+// Input: keyboard + joystick
+// ---------------------------
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+// joystick
+let joyX = 0, joyY = 0;
+const manager = nipplejs.create({
+  zone: document.body,
+  mode: 'static',
+  position: { left: 80, bottom: 80 },
+  color: 'gray',
+  size: 100
+});
+manager.on('move', (evt, data) => {
+  if (!data || !data.vector) return;
+  joyX = data.vector.x;
+  joyY = -data.vector.y; // invert so up = negative y in nipple coords -> forward
+});
+manager.on('end', () => { joyX = 0; joyY = 0; });
+
+// ---------------------------
+// Simple collision check
+// ---------------------------
+function willCollide(nextPos) {
+  // compute player's bounding box at nextPos
+  const halfY = playerHeight / 2;
+  const tmpBB = new THREE.Box3(
+    new THREE.Vector3(nextPos.x - 0.4, nextPos.y - halfY, nextPos.z - 0.4),
+    new THREE.Vector3(nextPos.x + 0.4, nextPos.y + halfY, nextPos.z + 0.4)
+  );
+
+  // check against each building bbox (precomputed)
+  for (let i = 0; i < buildingBoxes.length; i++) {
+    if (tmpBB.intersectsBox(buildingBoxes[i])) return true;
+  }
+  return false;
+}
+
+// ---------------------------
+// Animation loop
+// ---------------------------
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+
+  // movement vector from keyboard
+  let mvX = 0, mvZ = 0;
+  if (keys['w'] || keys['arrowup']) mvZ -= 1;
+  if (keys['s'] || keys['arrowdown']) mvZ += 1;
+  if (keys['a'] || keys['arrowleft']) mvX -= 1;
+  if (keys['d'] || keys['arrowright']) mvX += 1;
+
+  // add joystick
+  mvX += joyX;
+  mvZ += joyY;
+
+  // normalize and move
+  const len = Math.hypot(mvX, mvZ);
+  if (len > 0.001) {
+    const nx = mvX / len;
+    const nz = mvZ / len;
+    // compute angle for facing
+    const angle = Math.atan2(nx, nz);
+    player.rotation.y = angle;
+
+    // propose next position
+    const speed = 6; // units / sec
+    const next = player.position.clone();
+    next.x += (nx * speed) * dt;
+    next.z += (nz * speed) * dt;
+
+    // collision check
+    if (!willCollide(next)) {
+      player.position.copy(next);
+    } else {
+      // try slide: try moving only X or only Z separately
+      const altX = player.position.clone(); altX.x = next.x;
+      const altZ = player.position.clone(); altZ.z = next.z;
+      if (!willCollide(altX)) player.position.copy(altX);
+      else if (!willCollide(altZ)) player.position.copy(altZ);
+      // else blocked
+    }
+  }
+
+  // camera smooth follow
+  const desired = player.position.clone().add(camOffset.clone().applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y));
+  camera.position.lerp(desired, 0.12);
+  camera.lookAt(player.position);
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---------------------------
+// handle resize
+// ---------------------------
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
