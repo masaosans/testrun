@@ -1,95 +1,134 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>Shimane PLATEAU in Three.js</title>
-<style>
-  body { margin:0; overflow:hidden; }
-  #ui { position:absolute; top:10px; left:10px; z-index:10; }
-  button { margin:3px; padding:5px 10px; }
-</style>
+  <meta charset="UTF-8">
+  <title>PLATEAU – 島根県 GeoJSON Viewer (Three.js)</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.4);
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+  </style>
+
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- OrbitControls -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.js"></script>
 </head>
 <body>
+<div id="info">PLATEAU 島根県（建物）GeoJSON Viewer</div>
 
-<div id="ui">
-  <button id="btnAerial">上空視点</button>
-  <button id="btnGround">地上視点</button>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.js"></script>
 <script>
-  // --- Renderer ---
-  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  //----------------------------------------------------
+  // 1. 基本セットアップ
+  //----------------------------------------------------
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
+
+  const camera = new THREE.PerspectiveCamera(
+    60, window.innerWidth / window.innerHeight, 0.1, 20000
+  );
+  camera.position.set(0, 200, 800);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // --- Scene ---
-  const scene = new THREE.Scene();
+  // カメラ操作
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
 
-  // --- Camera (2つ用意する）---
-  const cameraAerial = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 50000);
-  cameraAerial.position.set(0, 500, 800);
+  // ライト
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(300, 500, 400);
+  scene.add(light);
 
-  const cameraGround = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50000);
-  cameraGround.position.set(0, 3, 15);
+  //----------------------------------------------------
+  // 2. GeoJSON 読み込み（島根県）※軽めのデータを利用
+  //----------------------------------------------------
+  // PLATEAU 島根県 建物（縮小版 GeoJSON）
+  // ※本番の 3D Tiles（3D）や CityGML は非常に重いため軽量 GeoJSON を使用
+  const GEOJSON_URL =
+    "https://plateau-geojson.s3.ap-northeast-1.amazonaws.com/32_shimane_buildings_sample.geojson";
 
-  let activeCamera = cameraAerial;
+  fetch(GEOJSON_URL)
+    .then(res => res.json())
+    .then(drawGeoJSON)
+    .catch(err => console.error("GeoJSON Load Error:", err));
 
-  // --- Controls ---
-  const controls = new THREE.OrbitControls(activeCamera, renderer.domElement);
+  //----------------------------------------------------
+  // 3. GeoJSON を Three.js で描画
+  //----------------------------------------------------
+  function drawGeoJSON(geojson) {
+    const group = new THREE.Group();
 
-  // --- Light ---
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(100,200,100);
-  scene.add(dir);
+    geojson.features.forEach(f => {
+      if (!f.geometry) return;
 
-  // --- Load Shimane PLATEAU model ---
-  const loader = new THREE.GLTFLoader();
-  loader.load(
-    "masuda/bldg_Building.gltf",   // ← 実際のパスに変更
-    (gltf) => {
-      const model = gltf.scene;
-      model.scale.set(1,1,1);
+      const geom = f.geometry;
 
-      // 座標が離れている場合は中央に寄せる
-      model.position.set(0,0,0);
+      // ポリゴン or マルチポリゴン
+      if (geom.type === "Polygon") {
+        drawPolygon(geom.coordinates, group);
+      } else if (geom.type === "MultiPolygon") {
+        geom.coordinates.forEach(poly => drawPolygon(poly, group));
+      }
+    });
 
-      scene.add(model);
-    },
-    undefined,
-    (error) => console.error("モデル読み込みエラー:", error)
-  );
+    scene.add(group);
+  }
 
-  // --- Camera switching ---
-  document.getElementById("btnAerial").onclick = () => {
-    activeCamera = cameraAerial;
-    controls.object = activeCamera;
-  };
+  //----------------------------------------------------
+  // Polygon → Three.js (Line)
+  //----------------------------------------------------
+  function drawPolygon(coords, parent) {
+    const shape = coords[0]; // 外周
 
-  document.getElementById("btnGround").onclick = () => {
-    activeCamera = cameraGround;
-    controls.object = activeCamera;
-  };
+    const points = shape.map(([lon, lat]) => {
+      // 仮の2D投影：緯度経度 ×10000（地図投影の簡易版）
+      return new THREE.Vector3(
+        lon * 10000 - 1330000,  // 位置ズレ調整
+        0,
+        lat * 10000 - 350000
+      );
+    });
 
-  // --- Render loop ---
-  function animate(){
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const line = new THREE.LineLoop(
+      geometry,
+      new THREE.LineBasicMaterial({ color: 0x00ffcc })
+    );
+
+    parent.add(line);
+  }
+
+  //----------------------------------------------------
+  // 4. 画面リサイズ対応
+  //----------------------------------------------------
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  //----------------------------------------------------
+  // 5. レンダリングループ
+  //----------------------------------------------------
+  function animate() {
     requestAnimationFrame(animate);
     controls.update();
-    renderer.render(scene, activeCamera);
+    renderer.render(scene, camera);
   }
   animate();
-
-  // --- Resize ---
-  window.addEventListener("resize", () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    cameraAerial.aspect = window.innerWidth/window.innerHeight;
-    cameraAerial.updateProjectionMatrix();
-    cameraGround.aspect = window.innerWidth/window.innerHeight;
-    cameraGround.updateProjectionMatrix();
-  });
 </script>
+
 </body>
 </html>
