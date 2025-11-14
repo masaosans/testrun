@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Shimane PLATEAU in Three.js</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  #ui { position:absolute; top:10px; left:10px; z-index:10; }
+  button { margin:3px; padding:5px 10px; }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <button id="btnAerial">上空視点</button>
+  <button id="btnGround">地上視点</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+  // --- Renderer ---
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // --- Scene ---
+  const scene = new THREE.Scene();
+
+  // --- Camera (2つ用意する）---
+  const cameraAerial = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 50000);
+  cameraAerial.position.set(0, 500, 800);
+
+  const cameraGround = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 50000);
+  cameraGround.position.set(0, 3, 15);
+
+  let activeCamera = cameraAerial;
+
+  // --- Controls ---
+  const controls = new THREE.OrbitControls(activeCamera, renderer.domElement);
+
+  // --- Light ---
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(100,200,100);
+  scene.add(dir);
+
+  // --- Load Shimane PLATEAU model ---
+  const loader = new THREE.GLTFLoader();
+  loader.load(
+    "output_gltf/YOUR_FILE_NAME/scene.gltf",   // ← 実際のパスに変更
+    (gltf) => {
+      const model = gltf.scene;
+      model.scale.set(1,1,1);
+
+      // 座標が離れている場合は中央に寄せる
+      model.position.set(0,0,0);
+
+      scene.add(model);
+    },
+    undefined,
+    (error) => console.error("モデル読み込みエラー:", error)
+  );
+
+  // --- Camera switching ---
+  document.getElementById("btnAerial").onclick = () => {
+    activeCamera = cameraAerial;
+    controls.object = activeCamera;
+  };
+
+  document.getElementById("btnGround").onclick = () => {
+    activeCamera = cameraGround;
+    controls.object = activeCamera;
+  };
+
+  // --- Render loop ---
+  function animate(){
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, activeCamera);
+  }
+  animate();
+
+  // --- Resize ---
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    cameraAerial.aspect = window.innerWidth/window.innerHeight;
+    cameraAerial.updateProjectionMatrix();
+    cameraGround.aspect = window.innerWidth/window.innerHeight;
+    cameraGround.updateProjectionMatrix();
+  });
+</script>
+</body>
+</html>
