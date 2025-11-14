@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>3D City with OSMBuildings + Three.js</title>
+  <style>
+    body { margin:0; overflow:hidden; }
+    #map { position:absolute; top:0; left:0; width:100%; height:100%; }
+    canvas { display:block; } /* Three.js renderer */
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Three.js -->
+  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+
+  <!-- OSMBuildings Library -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/osmbuildings@4.1.1/dist/OSMBuildings.css">
+  <script src="https://cdn.jsdelivr.net/npm/osmbuildings@4.1.1/dist/OSMBuildings.js"></script>
+
+  <!-- Virtual joystick for mobile -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
+  <script>
+    // ----------------------------
+    // ① OSMBuildings 初期化
+    // ----------------------------
+    const osmb = new OSMBuildings({
+      position: { latitude: 35.6812, longitude: 139.7671 }, // 東京駅付近
+      zoom: 18,
+      minZoom: 15,
+      maxZoom: 22,
+      container: 'map'
+    });
+
+    // 衛星・地図タイルを追加（OpenStreetMap 標準タイルを使用）
+    osmb.addMapTiles(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {
+        attribution: '© OpenStreetMap contributors'
+      }
+    );
+
+    // 建物の 3D データタイル（GeoJSON）を追加
+    osmb.addGeoJSONTiles(
+      'https://data.osmbuildings.org/0.2/anonymous/tile/{z}/{x}/{y}.json'
+    );
+
+    // ----------------------------
+    // ② Three.js セットアップ
+    // ----------------------------
+    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 2000);
+
+    // ライト
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(5,10,3);
+    scene.add(light);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambient);
+
+    // キャラクター（Box）
+    const playerGeo = new THREE.BoxGeometry(1,2,1);
+    const playerMat = new THREE.MeshStandardMaterial({ color:0x00ffcc });
+    const player = new THREE.Mesh(playerGeo, playerMat);
+    player.position.set(0,1,0);
+    scene.add(player);
+
+    // カメラ追随関数
+    function updateCamera(){
+      const offset = new THREE.Vector3(0,5,-10);
+      offset.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+      camera.position.copy(player.position).add(offset);
+      camera.lookAt(player.position);
+    }
+
+    // 操作変数
+    const keys = {};
+    document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+    document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
+
+    let joyX=0, joyY=0;
+    const joystick = nipplejs.create({
+      zone: document.body,
+      mode: 'static',
+      position: { left:80, bottom:80 },
+      color:'white'
+    });
+    joystick.on('move', (evt, data) => {
+      joyX = data.vector.x;
+      joyY = -data.vector.y;
+    });
+    joystick.on('end', ()=>{ joyX=0; joyY=0; });
+
+    // アニメーションループ
+    function animate(){
+      requestAnimationFrame(animate);
+
+      // 移動入力
+      let moveX = 0, moveZ = 0;
+      if (keys['w']) moveZ -= 1;
+      if (keys['s']) moveZ += 1;
+      if (keys['a']) moveX -= 1;
+      if (keys['d']) moveX += 1;
+      moveX += joyX;
+      moveZ += joyY;
+
+      if (Math.hypot(moveX, moveZ) > 0.001) {
+        const angle = Math.atan2(moveX, moveZ);
+        player.rotation.y = angle;
+        player.position.x += Math.sin(angle) * 0.1;
+        player.position.z += Math.cos(angle) * 0.1;
+      }
+
+      updateCamera();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+
+</body>
+</html>
