@@ -5,47 +5,47 @@
 <title>3D City Walk</title>
 <style>
     body { margin: 0; overflow: hidden; }
-    #joystick { position: absolute; bottom: 20px; left: 20px; }
 </style>
 </head>
 <body>
 
-<!-- ▼ Three.js CDN（常に最新で 404 が出ない安定版） -->
+<!-- Three.js -->
 <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
 
-<!-- ▼ OSM Buildings -->
-<script src="https://cdn.jsdelivr.net/npm/osmbuildings@4.1.1/dist/osmbuildings.min.js"></script>
+<!-- OSM Buildings（最新・安定版） -->
+<script src="https://cdn.jsdelivr.net/npm/osmbuildings@4.1.1/dist/osmbuildings.js"></script>
 
-<!-- ▼ バーチャルジョイスティック（スマホ用） -->
+<!-- バーチャルスティック -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
 
 <script>
 ////////////////////////////////////////////////////
-// ★ 3D シーン基本セットアップ
+// ★ Three.js 基本セットアップ
 ////////////////////////////////////////////////////
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 ////////////////////////////////////////////////////
-// ★ 街データ（OSM）生成
+// ★ OSM Buildings マップ生成（※ new OSMBuildings.OB !!）
 ////////////////////////////////////////////////////
-const osmb = new OSMBuildings({
+const osmb = new OSMBuildings.OB({
     baseURL: '',
     minZoom: 15,
     maxZoom: 22,
     zoom: 18,
     position: { latitude: 35.6812, longitude: 139.7671 }, // 東京駅
     tilt: 30,
-    rotation: 0,
-    effects: ['shadows'],
+    rotation: 0
 });
-osmb.addTo(document.body);
+
+// 描画レイヤーをブラウザに追加
+osmb.appendTo(document.body);
 
 ////////////////////////////////////////////////////
-// ★ キャラクター（簡易キューブ）
+// ★ キャラクター（立方体）
 ////////////////////////////////////////////////////
 const playerGeo = new THREE.BoxGeometry(1, 2, 1);
 const playerMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc });
@@ -53,27 +53,27 @@ const player = new THREE.Mesh(playerGeo, playerMat);
 player.position.set(0, 1, 0);
 scene.add(player);
 
-// 光
+// 光源
 const light = new THREE.DirectionalLight(0xffffff, 1);
 light.position.set(5, 10, 3);
 scene.add(light);
 
 ////////////////////////////////////////////////////
-// ★ TPSカメラ（後方・俯瞰）
+// ★ TPS カメラ
 ////////////////////////////////////////////////////
 function updateCamera() {
     const offset = new THREE.Vector3(0, 5, -10);
-    offset.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+    offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotation.y);
     camera.position.copy(player.position).add(offset);
     camera.lookAt(player.position);
 }
 
 ////////////////////////////////////////////////////
-// ★ キーボード操作
+// ★ PC 操作
 ////////////////////////////////////////////////////
 const keys = {};
-document.addEventListener('keydown', e => keys[e.key] = true);
-document.addEventListener('keyup',   e => keys[e.key] = false);
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup",   e => keys[e.key] = false);
 
 ////////////////////////////////////////////////////
 // ★ スマホジョイスティック
@@ -94,12 +94,11 @@ joystick.on("move", (evt, data) => {
 joystick.on("end", () => { joyX = 0; joyY = 0; });
 
 ////////////////////////////////////////////////////
-// ★ 毎フレーム更新
+// ★ アニメーションループ
 ////////////////////////////////////////////////////
 function animate() {
     requestAnimationFrame(animate);
 
-    // ---- 移動処理 ----
     let speed = 0.1;
     let moveX = 0, moveZ = 0;
 
@@ -120,13 +119,13 @@ function animate() {
         player.position.z += Math.cos(angle) * speed;
     }
 
-    // カメラ追従
+    // TPSカメラ追従
     updateCamera();
 
     renderer.render(scene, camera);
 }
 animate();
-
 </script>
+
 </body>
 </html>
