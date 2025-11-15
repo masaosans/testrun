@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM 3D 正確配置サンプル</title>
+<title>OSM 3D 広域サンプル</title>
 <style>
 body { margin:0; overflow:hidden; }
 canvas { display:block; }
@@ -18,18 +18,20 @@ button { margin: 2px; }
   <button onclick="setCameraTPS()">TPS視点</button>
   <button onclick="setCameraOblique()">斜め俯瞰</button>
   <button onclick="setCameraTop()">上空俯瞰</button>
+  <button onclick="setCameraRotate()">自由回転</button>
 </div>
 
 <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
 
 <script>
 // ----------------------------
-// ① Three.js 初期設定
+// ① Three.js 基本セットアップ
 // ----------------------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 5000);
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -37,20 +39,23 @@ document.body.appendChild(renderer.domElement);
 
 // 光
 const dir = new THREE.DirectionalLight(0xffffff, 1);
-dir.position.set(50, 100, 50);
+dir.position.set(100, 200, 100);
 scene.add(dir);
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
 // 地面
-const groundGeo = new THREE.PlaneGeometry(2000,2000);
+const groundGeo = new THREE.PlaneGeometry(5000,5000);
 const groundMat = new THREE.MeshStandardMaterial({color:0x7cfc00});
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
+// OrbitControls（自由回転用）
+let controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enabled = false;
+
 // ----------------------------
 // ② 簡易窓テクスチャ
-// ----------------------------
 const canvas = document.createElement('canvas');
 canvas.width = canvas.height = 64;
 const ctx = canvas.getContext('2d');
@@ -66,19 +71,18 @@ const windowTex = new THREE.CanvasTexture(canvas);
 // ----------------------------
 // ③ 緯度経度 → Three.js X,Z 変換
 function latLonToXZ(lat, lon, refLat, refLon){
-    const R = 6378137; // 地球半径[m]
+    const R = 6378137;
     const dLat = (lat - refLat) * Math.PI / 180;
     const dLon = (lon - refLon) * Math.PI / 180;
-    const x = dLon * R * Math.cos(refLat * Math.PI / 180); // 経度方向に緯度補正
-    const z = -dLat * R; // 緯度方向（南北逆にして Z 奥行き）
+    const x = dLon * R * Math.cos(refLat * Math.PI / 180);
+    const z = -dLat * R;
     return [x, z];
 }
 
 // ----------------------------
-// ④ OSM 建物データロード
-// 東京駅周辺 0.01度四方
-const minLat = 35.677, maxLat = 35.683;
-const minLon = 139.764, maxLon = 139.770;
+// ④ OSM 建物データロード（広域）
+const minLat = 35.675, maxLat = 35.695;
+const minLon = 139.760, maxLon = 139.780;
 
 const query = `
 [out:json][timeout:25];
@@ -105,7 +109,7 @@ fetch('https://overpass-api.de/api/interpreter',{
         return latLonToXZ(n.lat, n.lon, minLat, minLon);
       });
 
-      let height = 20; // デフォルト
+      let height = 20;
       if(e.tags.height){
         const h = parseFloat(e.tags.height.replace('m',''));
         if(!isNaN(h)) height = h;
@@ -128,16 +132,24 @@ fetch('https://overpass-api.de/api/interpreter',{
 // ----------------------------
 // ⑤ カメラ位置切替
 function setCameraTPS(){
-  camera.position.set(50,30,100);
-  camera.lookAt(50,0,50);
+  controls.enabled = false;
+  camera.position.set(500,50,500);
+  camera.lookAt(0,0,0);
 }
 function setCameraOblique(){
-  camera.position.set(150,150,150);
-  camera.lookAt(50,0,50);
+  controls.enabled = false;
+  camera.position.set(1000,400,1000);
+  camera.lookAt(0,0,0);
 }
 function setCameraTop(){
-  camera.position.set(50,300,50);
-  camera.lookAt(50,0,50);
+  controls.enabled = false;
+  camera.position.set(0,1000,0);
+  camera.lookAt(0,0,0);
+}
+function setCameraRotate(){
+  controls.enabled = true;
+  controls.target.set(0,0,0);
+  controls.update();
 }
 
 // 初期カメラ
@@ -147,6 +159,7 @@ setCameraOblique();
 // ⑥ レンダリングループ
 function animate(){
   requestAnimationFrame(animate);
+  if(controls.enabled) controls.update();
   renderer.render(scene,camera);
 }
 animate();
