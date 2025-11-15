@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>渋谷建物 3D (POST 方式)</title>
+<title>渋谷建物 3D (GeoJSON 内蔵)</title>
 <style>
   body { margin:0; overflow:hidden; }
   #ui { position:absolute; top:10px; left:10px; z-index:10;
@@ -12,10 +12,9 @@
 <body>
 
 <div id="ui">
-  <button id="loadBtn">建物ロード（渋谷）</button>
+  <button id="loadBtn">建物ロード（GeoJSON）</button>
 </div>
 
-<!-- Three.js グローバル -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
@@ -30,7 +29,7 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa0c4ff);
 
-const camera = new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,5000);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 5000);
 camera.position.set(0,300,400);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -42,9 +41,9 @@ const sun = new THREE.DirectionalLight(0xffffff,0.8);
 sun.position.set(300,600,300);
 scene.add(sun);
 
-// Ground + OSMタイル風背景
+// Ground + OSM タイル風背景
 const loader = new THREE.TextureLoader();
-const mapTex = loader.load('https://tile.openstreetmap.org/16/58269/25805.png'); // 渋谷付近
+const mapTex = loader.load('https://tile.openstreetmap.org/16/58269/25805.png');
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(500,500),
   new THREE.MeshPhongMaterial({ map: mapTex })
@@ -59,11 +58,35 @@ function lon2x(lon){ return (lon-139.699)*100000; }
 function lat2z(lat){ return -(lat-35.659)*100000; }
 
 // ==========================
+// サンプル GeoJSON（渋谷付近の建物）
+// ==========================
+const sampleGeoJSON = {
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type":"Feature",
+      "geometry":{"type":"Polygon","coordinates":[[[139.700,35.660],[139.701,35.660],[139.701,35.661],[139.700,35.661]]]},
+      "properties":{"building:levels":5}
+    },
+    {
+      "type":"Feature",
+      "geometry":{"type":"Polygon","coordinates":[[[139.701,35.660],[139.702,35.660],[139.702,35.661],[139.701,35.661]]]},
+      "properties":{"building:levels":3}
+    },
+    {
+      "type":"Feature",
+      "geometry":{"type":"Polygon","coordinates":[[[139.700,35.661],[139.701,35.661],[139.701,35.662],[139.700,35.662]]]},
+      "properties":{"building:levels":8}
+    }
+  ]
+};
+
+// ==========================
 // GeoJSON → 3D建物
 // ==========================
 function addBuildingsFromGeoJSON(geojson){
   const texLoader = new THREE.TextureLoader();
-  const windowTex = texLoader.load('https://i.imgur.com/4NJx7G9.png'); // 窓パターン
+  const windowTex = texLoader.load('https://i.imgur.com/4NJx7G9.png');
 
   geojson.features.forEach(f=>{
     if(!f.geometry || f.geometry.type!=="Polygon") return;
@@ -76,18 +99,16 @@ function addBuildingsFromGeoJSON(geojson){
       else shape.lineTo(x,z);
     });
 
-    // 高さ
-    let height=10;
-    const p = f.properties||{};
-    if(p.height) height=parseFloat(String(p.height).replace('m',''));
-    else if(p["building:levels"]) height=parseFloat(p["building:levels"])*3;
+    let height = 10;
+    const p = f.properties || {};
+    if(p.height) height = parseFloat(String(p.height).replace('m',''));
+    else if(p["building:levels"]) height = parseFloat(p["building:levels"])*3;
 
-    // 色分け
     let color=0x88aaff;
     if(height>60) color=0xffaa88;
     else if(height>40) color=0xaaff88;
 
-    const geo = new THREE.ExtrudeGeometry(shape,{depth:height,bevelEnabled:false});
+    const geo = new THREE.ExtrudeGeometry(shape,{depth:height, bevelEnabled:false});
     const mat = new THREE.MeshPhongMaterial({map:windowTex, color:color});
     const mesh = new THREE.Mesh(geo, mat);
     mesh.rotation.x=-Math.PI/2;
@@ -97,34 +118,9 @@ function addBuildingsFromGeoJSON(geojson){
 }
 
 // ==========================
-// POST 方式で Overpass API 取得
+// UI ボタン
 // ==========================
-async function fetchShibuyaBuildingsPOST(){
-  const query = `
-    [out:json][timeout:25];
-    (
-      way["building"](35.658,139.699,35.662,139.703);
-    );
-    (._;>;);
-    out geom;
-  `;
-  try{
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method:"POST",
-      body: query
-    });
-    const data = await res.json();
-    addBuildingsFromGeoJSON(data);
-    console.log("建物ロード完了");
-  }catch(err){
-    console.error("建物取得エラー:", err);
-  }
-}
-
-// ==========================
-// UIボタン
-// ==========================
-document.getElementById('loadBtn').onclick = ()=>{ fetchShibuyaBuildingsPOST(); };
+document.getElementById('loadBtn').onclick = ()=>{ addBuildingsFromGeoJSON(sampleGeoJSON); };
 
 // ==========================
 // Render loop
