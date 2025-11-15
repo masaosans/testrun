@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>OSM 3D Sample</title>
+<style>
+body { margin:0; overflow:hidden; }
+canvas { display:block; }
+#ui {
+  position: fixed; top: 8px; left: 8px; background: rgba(255,255,255,0.8);
+  padding: 6px 8px; border-radius: 6px; font-family: sans-serif; font-size: 14px;
+}
+button { margin: 2px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <button onclick="setCameraTPS()">TPS視点</button>
+  <button onclick="setCameraOblique()">俯瞰</button>
+  <button onclick="setCameraTop()">上空俯瞰</button>
+</div>
+
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+
+<script>
+// ----------------------------
+// ① Three.js 初期設定
+// ----------------------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+// 光
+const dir = new THREE.DirectionalLight(0xffffff, 1);
+dir.position.set(50, 100, 50);
+scene.add(dir);
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+// 地面
+const groundGeo = new THREE.PlaneGeometry(2000,2000);
+const groundMat = new THREE.MeshStandardMaterial({color:0x7cfc00});
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// ----------------------------
+// ② 簡易窓テクスチャ
+// ----------------------------
+const canvas = document.createElement('canvas');
+canvas.width = canvas.height = 64;
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = "#8888aa"; ctx.fillRect(0,0,64,64);
+ctx.fillStyle = "#222222";
+for(let y=2;y<64;y+=8){
+  for(let x=2;x<64;x+=8){
+    ctx.fillRect(x,y,4,4);
+  }
+}
+const windowTex = new THREE.CanvasTexture(canvas);
+
+// ----------------------------
+// ③ OSM 建物データロード
+// 東京駅周辺 0.01度四方
+const minLat = 35.677, maxLat = 35.683;
+const minLon = 139.764, maxLon = 139.770;
+
+const query = `
+[out:json][timeout:25];
+(
+  way["building"](${minLat},${minLon},${maxLat},${maxLon});
+);
+out body;
+>;
+out skel qt;
+`;
+
+fetch('https://overpass-api.de/api/interpreter',{
+  method:'POST',
+  body: query
+}).then(res=>res.json())
+.then(data=>{
+  const nodes = {};
+  data.elements.forEach(e=>{ if(e.type==="node") nodes[e.id]=e; });
+
+  data.elements.forEach(e=>{
+    if(e.type==="way" && e.tags && e.tags.building){
+      const coords = e.nodes.map(id=>{
+        const n = nodes[id];
+        return [(n.lon-minLon)*111000, (n.lat-minLat)*111000]; // 緯度経度→X,Z
+      });
+
+      let height = 20; // デフォルト
+      if(e.tags.height){
+        const h = parseFloat(e.tags.height.replace('m',''));
+        if(!isNaN(h)) height = h;
+      } else if(e.tags['building:levels']){
+        const lv = parseFloat(e.tags['building:levels']);
+        if(!isNaN(lv)) height = lv*3;
+      }
+
+      const shape = new THREE.Shape();
+      coords.forEach((p,i)=>{ if(i===0) shape.moveTo(p[0],p[1]); else shape.lineTo(p[0],p[1]); });
+      const geo = new THREE.ExtrudeGeometry(shape, {depth: height, bevelEnabled:false});
+      const mat = new THREE.MeshStandardMaterial({map: windowTex});
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = 0;
+      scene.add(mesh);
+    }
+  });
+});
+
+// ----------------------------
+// ④ カメラ位置切替
+// ----------------------------
+function setCameraTPS(){
+  camera.position.set(50,30,100);
+  camera.lookAt(50,0,50);
+}
+function setCameraOblique(){
+  camera.position.set(150,150,150);
+  camera.lookAt(50,0,50);
+}
+function setCameraTop(){
+  camera.position.set(50,300,50);
+  camera.lookAt(50,0,50);
+}
+
+// 初期カメラ
+setCameraOblique();
+
+// ----------------------------
+// ⑤ レンダリングループ
+// ----------------------------
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
+}
+animate();
+
+// ----------------------------
+// リサイズ対応
+window.addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
