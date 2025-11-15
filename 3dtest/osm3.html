@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM 3D 広域サンプル (OrbitControls 修正版)</title>
+<title>OSM 3D 広域サンプル (CDNモジュール版)</title>
 <style>
 body { margin:0; overflow:hidden; }
 canvas { display:block; }
@@ -22,13 +22,12 @@ button { margin: 2px; }
 </div>
 
 <script type="module">
-// ----------------------------
-// モジュール読み込み
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
 
 // ----------------------------
-// Three.js 初期設定
+// ① Three.js 初期設定
+// ----------------------------
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
@@ -56,7 +55,7 @@ let controls = new OrbitControls(camera, renderer.domElement);
 controls.enabled = false;
 
 // ----------------------------
-// 簡易窓テクスチャ
+// ② 簡易窓テクスチャ
 const canvas = document.createElement('canvas');
 canvas.width = canvas.height = 64;
 const ctx = canvas.getContext('2d');
@@ -70,7 +69,7 @@ for(let y=2;y<64;y+=8){
 const windowTex = new THREE.CanvasTexture(canvas);
 
 // ----------------------------
-// 緯度経度 → X,Z 変換
+// ③ 緯度経度 → X,Z 変換
 function latLonToXZ(lat, lon, refLat, refLon){
     const R = 6378137;
     const dLat = (lat - refLat) * Math.PI / 180;
@@ -81,7 +80,7 @@ function latLonToXZ(lat, lon, refLat, refLon){
 }
 
 // ----------------------------
-// OSM 建物データロード（広域）
+// ④ OSM 建物データロード（広域）
 const minLat = 35.675, maxLat = 35.695;
 const minLon = 139.760, maxLon = 139.780;
 
@@ -131,7 +130,7 @@ fetch('https://overpass-api.de/api/interpreter',{
 });
 
 // ----------------------------
-// カメラ切替関数
+// ⑤ カメラ切替関数
 function setCameraTPS(){
   controls.enabled = false;
   camera.position.set(500,50,500);
@@ -157,7 +156,7 @@ function setCameraRotate(){
 setCameraOblique();
 
 // ----------------------------
-// レンダリングループ
+// ⑥ レンダリングループ
 function animate(){
   requestAnimationFrame(animate);
   if(controls.enabled) controls.update();
