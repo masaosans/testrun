@@ -14,10 +14,7 @@
     border-radius: 6px;
     font-family: sans-serif;
   }
-  button {
-    padding: 6px 10px;
-    margin-right: 4px;
-  }
+  button { padding: 6px 10px; margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -27,83 +24,79 @@
   <button id="orthoBtn">Orthographic Camera</button>
 </div>
 
-<!-- THREE (global) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+<!-- THREE.js（グローバル THREE） -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 
-<!-- OrbitControls (global) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/examples/js/controls/OrbitControls.js"></script>
+<!-- OrbitControls（グローバル THREE 用） -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <script>
-  // Renderer
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // Scene
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf0f0f0);
 
-  // Default Perspective Camera
+  // Perspective Camera
   let camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
     0.1,
     2000
   );
-  camera.position.set(30, 30, 30);
+  camera.position.set(50, 50, 50);
 
   // Orthographic Camera
-  const orthoSize = 30;
-  const orthoCamera = new THREE.OrthographicCamera(
-    window.innerWidth / -orthoSize,
-    window.innerWidth / orthoSize,
-    window.innerHeight / orthoSize,
-    window.innerHeight / -orthoSize,
+  const s = 40;
+  let orthoCamera = new THREE.OrthographicCamera(
+    window.innerWidth / -s,
+    window.innerWidth / s,
+    window.innerHeight / s,
+    window.innerHeight / -s,
     0.1,
     2000
   );
-  orthoCamera.position.set(30, 30, 30);
+  orthoCamera.position.set(50, 50, 50);
 
-  // Active camera reference
+  // Active camera
   let activeCamera = camera;
 
-  // Controls
+  // OrbitControls
   const controls = new THREE.OrbitControls(activeCamera, renderer.domElement);
-  controls.target.set(0, 5, 0);
+  controls.target.set(0, 0, 0);
 
-  // Build simple building (box)
-  const geometry = new THREE.BoxGeometry(10, 20, 10);
-  const material = new THREE.MeshPhongMaterial({ color: 0x6699ff });
-  const building = new THREE.Mesh(geometry, material);
-  building.position.y = 10;
-  scene.add(building);
-
-  // Ground
-  const groundGeo = new THREE.PlaneGeometry(200, 200);
-  const groundMat = new THREE.MeshPhongMaterial({ color: 0xdddddd });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
+  // Ground Plane
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshPhongMaterial({ color: 0xdddddd })
+  );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
 
+  // Building sample
+  const building = new THREE.Mesh(
+    new THREE.BoxGeometry(20, 40, 20),
+    new THREE.MeshPhongMaterial({ color: 0x6699ff })
+  );
+  building.position.y = 20;
+  scene.add(building);
+
   // Light
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(10, 30, 20);
-  scene.add(light);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(30, 60, 40);
+  scene.add(dirLight);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambient);
-
-  // Camera switch buttons
+  // Camera switching
   document.getElementById("perspectiveBtn").onclick = () => {
     activeCamera = camera;
     controls.object = activeCamera;
-    controls.update();
   };
 
   document.getElementById("orthoBtn").onclick = () => {
     activeCamera = orthoCamera;
     controls.object = activeCamera;
-    controls.update();
   };
 
   // Resize
@@ -113,14 +106,14 @@
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
 
-    orthoCamera.left = window.innerWidth / -orthoSize;
-    orthoCamera.right = window.innerWidth / orthoSize;
-    orthoCamera.top = window.innerHeight / orthoSize;
-    orthoCamera.bottom = window.innerHeight / -orthoSize;
+    orthoCamera.left = window.innerWidth / -s;
+    orthoCamera.right = window.innerWidth / s;
+    orthoCamera.top = window.innerHeight / s;
+    orthoCamera.bottom = window.innerHeight / -s;
     orthoCamera.updateProjectionMatrix();
   });
 
-  // Animation
+  // Render loop
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
