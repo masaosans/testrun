@@ -2,125 +2,166 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>THREE Global + OrbitControls + Camera Switch</title>
+<title>OSM 3D Buildings + Tile Loader</title>
 <style>
   body { margin: 0; overflow: hidden; }
   #ui {
     position: absolute;
-    top: 10px; left: 10px;
+    top: 10px;
+    left: 10px;
     z-index: 10;
     background: rgba(255,255,255,0.8);
     padding: 8px;
     border-radius: 6px;
-    font-family: sans-serif;
   }
-  button { padding: 6px 10px; margin-right: 4px; }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <button id="perspectiveBtn">Perspective Camera</button>
-  <button id="orthoBtn">Orthographic Camera</button>
+  <button id="loadButton">OSM建物をロード</button>
 </div>
 
-<!-- THREE.js（グローバル THREE） -->
+<!-- three.js（グローバル版） -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-
-<!-- OrbitControls（グローバル THREE 用） -->
+<!-- OrbitControls（グローバル版） -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <script>
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf0f0f0);
+// ==============================
+// ■ Three.js 初期化
+// ==============================
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
 
-  // Perspective Camera
-  let camera = new THREE.PerspectiveCamera(
-    60,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    2000
-  );
-  camera.position.set(50, 50, 50);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa0c4ff);
 
-  // Orthographic Camera
-  const s = 40;
-  let orthoCamera = new THREE.OrthographicCamera(
-    window.innerWidth / -s,
-    window.innerWidth / s,
-    window.innerHeight / s,
-    window.innerHeight / -s,
-    0.1,
-    2000
-  );
-  orthoCamera.position.set(50, 50, 50);
+const camera = new THREE.PerspectiveCamera(
+  60,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  5000
+);
+camera.position.set(0, 200, 200);
 
-  // Active camera
-  let activeCamera = camera;
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
 
-  // OrbitControls
-  const controls = new THREE.OrbitControls(activeCamera, renderer.domElement);
-  controls.target.set(0, 0, 0);
+// Light
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.position.set(200, 300, 200);
+scene.add(sun);
 
-  // Ground Plane
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(500, 500),
-    new THREE.MeshPhongMaterial({ color: 0xdddddd })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  scene.add(ground);
+// Ground plane
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(5000, 5000),
+  new THREE.MeshPhongMaterial({ color: 0xdddddd })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
 
-  // Building sample
-  const building = new THREE.Mesh(
-    new THREE.BoxGeometry(20, 40, 20),
-    new THREE.MeshPhongMaterial({ color: 0x6699ff })
-  );
-  building.position.y = 20;
-  scene.add(building);
+// ==============================
+// ■ タイル座標 → 経度緯度範囲 変換
+// ==============================
+function tile2bbox(x, y, z) {
+  const n = Math.pow(2, z);
+  const lon1 = x / n * 360 - 180;
+  const lon2 = (x + 1) / n * 360 - 180;
 
-  // Light
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-  dirLight.position.set(30, 60, 40);
-  scene.add(dirLight);
+  const lat1 = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+  const lat2 = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))) * 180 / Math.PI;
 
-  // Camera switching
-  document.getElementById("perspectiveBtn").onclick = () => {
-    activeCamera = camera;
-    controls.object = activeCamera;
-  };
+  return [lon1, lat2, lon2, lat1];
+}
 
-  document.getElementById("orthoBtn").onclick = () => {
-    activeCamera = orthoCamera;
-    controls.object = activeCamera;
-  };
+// ==============================
+// ■ OSM Building GeoJSON → THREE Buildings
+// ==============================
+function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
+  json.features.forEach(f => {
+    if (!f.geometry || f.geometry.type !== "Polygon") return;
 
-  // Resize
-  window.addEventListener("resize", () => {
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const coords = f.geometry.coordinates[0];
 
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
+    // Shape を作る
+    const shape = new THREE.Shape();
+    coords.forEach((c, i) => {
+      const px = (c[0] - offsetX) * 10000; // 拡大スケール
+      const pz = (c[1] - offsetZ) * 10000;
+      if (i === 0) shape.moveTo(px, pz);
+      else shape.lineTo(px, pz);
+    });
 
-    orthoCamera.left = window.innerWidth / -s;
-    orthoCamera.right = window.innerWidth / s;
-    orthoCamera.top = window.innerHeight / s;
-    orthoCamera.bottom = window.innerHeight / -s;
-    orthoCamera.updateProjectionMatrix();
+    // 高さの決定
+    const h = f.properties.height
+      ? parseFloat(f.properties.height)
+      : (f.properties["building:levels"] ? f.properties["building:levels"] * 3 : 10);
+
+    // Extrude
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: h,
+      bevelEnabled: false
+    });
+    const mat = new THREE.MeshPhongMaterial({ color: 0x6699ff });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    mesh.rotation.x = -Math.PI / 2; // Z-up → Y-up
+    mesh.position.y = h / 2;
+
+    scene.add(mesh);
   });
+}
 
-  // Render loop
-  function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, activeCamera);
-  }
-  animate();
+// ==============================
+// ■ タイルロード (簡易版：1タイルだけ読み込み)
+// ==============================
+async function loadTile(z, x, y) {
+  const [lon1, lat1, lon2, lat2] = tile2bbox(x, y, z);
+
+  const url =
+    "https://overpass-api.de/api/interpreter?data=" +
+    encodeURIComponent(`
+      [out:json];
+      (
+        way["building"](${lat1},${lon1},${lat2},${lon2});
+      );
+      (._;>;);
+      out geom;
+    `);
+
+  console.log("Request:", url);
+  const res = await fetch(url);
+  const data = await res.json();
+
+  addBuildingFromGeoJSON(data, lon1, lat1);
+}
+
+// ==============================
+// ■ UI ボタン
+// ==============================
+document.getElementById("loadButton").onclick = () => {
+  // 渋谷区付近のタイル例
+  const z = 16;
+  const x = 58269;
+  const y = 25805;
+
+  loadTile(z, x, y);
+};
+
+// ==============================
+// ■ Render loop
+// ==============================
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
 </script>
-
 </body>
 </html>
