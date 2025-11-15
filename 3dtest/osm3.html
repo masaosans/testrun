@@ -22,12 +22,13 @@ button { margin: 2px; }
 </div>
 
 <script type="module">
+// ----------------------------
+// モジュール読み込み (CDN)
 import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
 import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
 
 // ----------------------------
-// ① Three.js 初期設定
-// ----------------------------
+// Three.js 初期設定
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
@@ -37,7 +38,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-// 光
+// 光源
 const dir = new THREE.DirectionalLight(0xffffff, 1);
 dir.position.set(100, 200, 100);
 scene.add(dir);
@@ -55,7 +56,7 @@ let controls = new OrbitControls(camera, renderer.domElement);
 controls.enabled = false;
 
 // ----------------------------
-// ② 簡易窓テクスチャ
+// 簡易窓テクスチャ作成
 const canvas = document.createElement('canvas');
 canvas.width = canvas.height = 64;
 const ctx = canvas.getContext('2d');
@@ -69,7 +70,7 @@ for(let y=2;y<64;y+=8){
 const windowTex = new THREE.CanvasTexture(canvas);
 
 // ----------------------------
-// ③ 緯度経度 → X,Z 変換
+// 緯度経度 → Three.js X,Z変換
 function latLonToXZ(lat, lon, refLat, refLon){
     const R = 6378137;
     const dLat = (lat - refLat) * Math.PI / 180;
@@ -80,7 +81,7 @@ function latLonToXZ(lat, lon, refLat, refLon){
 }
 
 // ----------------------------
-// ④ OSM 建物データロード（広域）
+// OSM 建物データロード（広域）
 const minLat = 35.675, maxLat = 35.695;
 const minLon = 139.760, maxLon = 139.780;
 
@@ -130,7 +131,7 @@ fetch('https://overpass-api.de/api/interpreter',{
 });
 
 // ----------------------------
-// ⑤ カメラ切替関数
+// カメラ切替関数
 function setCameraTPS(){
   controls.enabled = false;
   camera.position.set(500,50,500);
@@ -156,7 +157,7 @@ function setCameraRotate(){
 setCameraOblique();
 
 // ----------------------------
-// ⑥ レンダリングループ
+// レンダリングループ
 function animate(){
   requestAnimationFrame(animate);
   if(controls.enabled) controls.update();
