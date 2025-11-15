@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Local GeoJSON → Three.js 3D Buildings</title>
+<style>
+  body { margin: 0; overflow: hidden; }
+  #ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+    background: rgba(255,255,255,0.8);
+    padding: 8px;
+    border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <button id="loadBtn">建物ロード</button>
+</div>
+
+<!-- Three.js グローバル版 -->
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+
+// =========================
+// Three.js 初期化
+// =========================
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa0c4ff);
+
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth/window.innerHeight, 0.1, 5000
+);
+camera.position.set(0, 300, 300);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0,0,0);
+
+// Light
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(200,400,300);
+scene.add(sun);
+
+// Ground
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(5000,5000),
+  new THREE.MeshPhongMaterial({ color:0xe0e0e0 })
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
+
+// =========================
+// GeoJSON → 3D Building
+// =========================
+function addBuildingsFromGeoJSON(geojson){
+  if(!geojson.features) return;
+
+  geojson.features.forEach(f=>{
+    if(!f.geometry || f.geometry.type !== "Polygon") return;
+
+    const coords = f.geometry.coordinates[0];
+    const shape = new THREE.Shape();
+    coords.forEach((pt,i)=>{
+      const x = pt[0]*1000; // 緯度経度 → 座標スケール
+      const z = -pt[1]*1000;
+      if(i===0) shape.moveTo(x,z);
+      else shape.lineTo(x,z);
+    });
+
+    // 高さ
+    let height = 10;
+    const props = f.properties || {};
+    if(props.height) height = parseFloat(String(props.height).replace('m',''));
+    else if(props["building:levels"]) height = parseFloat(props["building:levels"])*3;
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled:false });
+    const mat = new THREE.MeshPhongMaterial({ color:0x88aaff });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI/2;
+    mesh.position.y = height/2;
+
+    scene.add(mesh);
+  });
+}
+
+// =========================
+// ローカル GeoJSON 読み込み
+// =========================
+document.getElementById('loadBtn').onclick = async ()=>{
+  try{
+    const res = await fetch('chugoku.geojson');
+    const data = await res.json();
+    addBuildingsFromGeoJSON(data);
+    console.log("建物ロード完了");
+  } catch(err){
+    console.error("GeoJSONロードエラー:", err);
+  }
+};
+
+// =========================
+// render loop
+// =========================
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// window resize
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+</script>
+</body>
+</html>
