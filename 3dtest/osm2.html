@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>3D City Walk - OSM + Height + Texture</title>
+<title>3D City Tile Demo</title>
 <style>
 body { margin:0; overflow:hidden; }
 canvas { display:block; }
@@ -25,7 +25,7 @@ canvas { display:block; }
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 3000);
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
@@ -41,7 +41,7 @@ scene.add(amb);
 
 // 地面
 const groundMat = new THREE.MeshStandardMaterial({ color:0x7cfc00 });
-const groundGeo = new THREE.PlaneGeometry(1000,1000);
+const groundGeo = new THREE.PlaneGeometry(2000,2000);
 const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI/2;
 ground.receiveShadow = true;
@@ -67,84 +67,78 @@ function updateCamera(){
 }
 
 // ----------------------------
-// 建物データロード（Overpass API）
+// 簡易窓テクスチャ
 // ----------------------------
-const bbox = [35.677,139.764,35.683,139.770]; // 東京駅周辺
-const query = `
-[out:json][timeout:25];
-(
-  way["building"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
-);
-out body;
->;
-out skel qt;
-`;
+const canvas = document.createElement('canvas');
+canvas.width = canvas.height = 64;
+const ctx = canvas.getContext('2d');
+ctx.fillStyle="#8888aa"; ctx.fillRect(0,0,64,64);
+ctx.fillStyle="#222222";
+for(let y=2;y<64;y+=8){
+  for(let x=2;x<64;x+=8){
+    ctx.fillRect(x,y,4,4);
+  }
+}
+const windowTex = new THREE.CanvasTexture(canvas);
 
-fetch('https://overpass-api.de/api/interpreter', {
-    method:'POST',
-    body: query
-})
-.then(res=>res.json())
-.then(data=>{
+// ----------------------------
+// タイルロード関数
+// ----------------------------
+const buildingMeshes = [];
+
+function fetchTile(lat, lon, tileSize){
+  const query = `
+[out:json][timeout:25];
+(way["building"](${lat},${lon},${lat+tileSize},${lon+tileSize}););
+out body;>;out skel qt;`;
+
+  fetch('https://overpass-api.de/api/interpreter', {
+    method:'POST', body:query
+  }).then(res=>res.json()).then(data=>{
     const nodes = {};
     data.elements.forEach(e=>{ if(e.type==="node") nodes[e.id]=e; });
 
-    const buildings = [];
     data.elements.forEach(e=>{
-        if(e.type==="way" && e.tags && e.tags.building){
-            const coords = e.nodes.map(id=>{
-                const n = nodes[id];
-                return [(n.lon-bbox[1])*111000, (n.lat-bbox[0])*111000];
-            });
-
-            // 高さ取得（height > building:levels*3 > default 20）
-            let height = 20; // default
-            if(e.tags.height){
-                const h = parseFloat(e.tags.height.replace('m',''));
-                if(!isNaN(h)) height = h;
-            } else if(e.tags['building:levels']){
-                const lv = parseFloat(e.tags['building:levels']);
-                if(!isNaN(lv)) height = lv*3;
-            }
-
-            buildings.push({coords, height});
-        }
-    });
-
-    // テクスチャ作成（簡易窓）
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle="#8888aa"; ctx.fillRect(0,0,64,64);
-    ctx.fillStyle="#222222";
-    for(let y=2;y<64;y+=8){
-        for(let x=2;x<64;x+=8){
-            ctx.fillRect(x,y,4,4);
-        }
-    }
-    const tex = new THREE.CanvasTexture(canvas);
-
-    // Three.js に建物追加
-    const buildingMeshes = [];
-    buildings.forEach(b=>{
-        const shape = new THREE.Shape();
-        b.coords.forEach((p,i)=>{
-            if(i===0) shape.moveTo(p[0], p[1]);
-            else shape.lineTo(p[0], p[1]);
+      if(e.type==="way" && e.tags && e.tags.building){
+        const coords = e.nodes.map(id=>{
+          const n = nodes[id];
+          return [(n.lon-lon)*111000, (n.lat-lat)*111000];
         });
-        const extrudeSettings = { depth: b.height, bevelEnabled:false };
-        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-        const mat = new THREE.MeshStandardMaterial({ map: tex });
+
+        let height = 20;
+        if(e.tags.height){
+          const h = parseFloat(e.tags.height.replace('m',''));
+          if(!isNaN(h)) height = h;
+        } else if(e.tags['building:levels']){
+          const lv = parseFloat(e.tags['building:levels']);
+          if(!isNaN(lv)) height = lv*3;
+        }
+
+        const shape = new THREE.Shape();
+        coords.forEach((p,i)=>{ if(i===0) shape.moveTo(p[0],p[1]); else shape.lineTo(p[0],p[1]); });
+        const geo = new THREE.ExtrudeGeometry(shape,{depth:height, bevelEnabled:false});
+        const mat = new THREE.MeshStandardMaterial({ map: windowTex });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.y = 0;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         scene.add(mesh);
         buildingMeshes.push(mesh);
+      }
     });
+  });
+}
 
-    window.buildingMeshes = buildingMeshes;
-});
+// ----------------------------
+// タイルを複数ロード（東京駅周辺 3x3 タイル 約600m四方）
+const tileSize = 0.002;
+const baseLat = 35.677;
+const baseLon = 139.764;
+for(let i=0;i<3;i++){
+  for(let j=0;j<3;j++){
+    fetchTile(baseLat+i*tileSize, baseLon+j*tileSize, tileSize);
+  }
+}
 
 // ----------------------------
 // 操作
@@ -155,24 +149,23 @@ window.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
 
 let joyX=0, joyY=0;
 nipplejs.create({
-    zone:document.body, mode:'static', position:{left:80,bottom:80}, color:'gray', size:100
+  zone:document.body, mode:'static', position:{left:80,bottom:80}, color:'gray', size:100
 }).on('move',(evt,data)=>{ joyX=data.vector.x; joyY=-data.vector.y; })
   .on('end',()=>{ joyX=0; joyY=0; });
 
 // ----------------------------
 // 衝突判定
 function willCollide(nextPos){
-    if(!window.buildingMeshes) return false;
-    const halfY = playerHeight/2;
-    const tmpBB = new THREE.Box3(
-        new THREE.Vector3(nextPos.x-0.4, nextPos.y-halfY, nextPos.z-0.4),
-        new THREE.Vector3(nextPos.x+0.4, nextPos.y+halfY, nextPos.z+0.4)
-    );
-    for(let i=0;i<window.buildingMeshes.length;i++){
-        const bb = new THREE.Box3().setFromObject(window.buildingMeshes[i]);
-        if(tmpBB.intersectsBox(bb)) return true;
-    }
-    return false;
+  const halfY = playerHeight/2;
+  const tmpBB = new THREE.Box3(
+    new THREE.Vector3(nextPos.x-0.4, nextPos.y-halfY, nextPos.z-0.4),
+    new THREE.Vector3(nextPos.x+0.4, nextPos.y+halfY, nextPos.z+0.4)
+  );
+  for(let i=0;i<buildingMeshes.length;i++){
+    const bb = new THREE.Box3().setFromObject(buildingMeshes[i]);
+    if(tmpBB.intersectsBox(bb)) return true;
+  }
+  return false;
 }
 
 // ----------------------------
@@ -180,39 +173,40 @@ function willCollide(nextPos){
 // ----------------------------
 const clock = new THREE.Clock();
 function animate(){
-    requestAnimationFrame(animate);
-    const dt = Math.min(0.05, clock.getDelta());
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
 
-    let mvX=0, mvZ=0;
-    if(keys['w']||keys['arrowup']) mvZ -= 1;
-    if(keys['s']||keys['arrowdown']) mvZ += 1;
-    if(keys['a']||keys['arrowleft']) mvX -= 1;
-    if(keys['d']||keys['arrowright']) mvX += 1;
-    mvX += joyX; mvZ += joyY;
+  let mvX=0, mvZ=0;
+  if(keys['w']||keys['arrowup']) mvZ -= 1;
+  if(keys['s']||keys['arrowdown']) mvZ += 1;
+  if(keys['a']||keys['arrowleft']) mvX -= 1;
+  if(keys['d']||keys['arrowright']) mvX += 1;
+  mvX += joyX; mvZ += joyY;
 
-    if(Math.hypot(mvX,mvZ)>0.001){
-        const nx = mvX/Math.hypot(mvX,mvZ);
-        const nz = mvZ/Math.hypot(mvX,mvZ);
-        const angle = Math.atan2(nx,nz);
-        player.rotation.y = angle;
-        const next = player.position.clone();
-        const speed = 6;
-        next.x += nx*speed*dt;
-        next.z += nz*speed*dt;
-        if(!willCollide(next)) player.position.copy(next);
-    }
+  if(Math.hypot(mvX,mvZ)>0.001){
+    const nx = mvX/Math.hypot(mvX,mvZ);
+    const nz = mvZ/Math.hypot(mvX,mvZ);
+    const angle = Math.atan2(nx,nz);
+    player.rotation.y = angle;
+    const next = player.position.clone();
+    const speed = 6;
+    next.x += nx*speed*dt;
+    next.z += nz*speed*dt;
+    if(!willCollide(next)) player.position.copy(next);
+  }
 
-    updateCamera();
-    renderer.render(scene,camera);
+  updateCamera();
+  renderer.render(scene,camera);
 }
 animate();
 
+// ----------------------------
+// リサイズ対応
 window.addEventListener('resize', ()=>{
-    camera.aspect = innerWidth/innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(innerWidth,innerHeight);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
 });
-
 </script>
 </body>
 </html>
