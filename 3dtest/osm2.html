@@ -1,136 +1,218 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>3D City with OSMBuildings + Three.js</title>
-  <style>
-    body { margin:0; overflow:hidden; }
-    #map { position:absolute; top:0; left:0; width:100%; height:100%; }
-    canvas { display:block; } /* Three.js renderer */
-  </style>
+<meta charset="UTF-8">
+<title>3D City Walk - OSM + Height + Texture</title>
+<style>
+body { margin:0; overflow:hidden; }
+canvas { display:block; }
+#info {
+  position:fixed; top:8px; left:8px; background:rgba(255,255,255,0.8);
+  padding:6px 8px; border-radius:6px; font-family:sans-serif; font-size:13px;
+}
+</style>
 </head>
 <body>
-  <div id="map"></div>
+<div id="info">WASD / スマホジョイスティックで移動</div>
 
-  <!-- Three.js -->
-  <script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
 
-  <!-- OSMBuildings Library -->
-<script src="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.js"></script>
-<link  rel="stylesheet" href="https://cdn.osmbuildings.org/4.1.1/OSMBuildings.css" />
+<script>
+// ----------------------------
+// Three.js 基本セットアップ
+// ----------------------------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
 
-  <!-- Virtual joystick for mobile -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
 
-  <script>
-    // ----------------------------
-    // ① OSMBuildings 初期化
-    // ----------------------------
-    const osmb = new OSMBuildings({
-      position: { latitude: 35.6812, longitude: 139.7671 }, // 東京駅付近
-      zoom: 18,
-      minZoom: 15,
-      maxZoom: 22,
-      container: 'map'
+// 光
+const dir = new THREE.DirectionalLight(0xffffff, 1);
+dir.position.set(50, 100, 50);
+dir.castShadow = true;
+scene.add(dir);
+const amb = new THREE.AmbientLight(0xffffff, 0.4);
+scene.add(amb);
+
+// 地面
+const groundMat = new THREE.MeshStandardMaterial({ color:0x7cfc00 });
+const groundGeo = new THREE.PlaneGeometry(1000,1000);
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ----------------------------
+// キャラクター
+// ----------------------------
+const playerHeight = 1.8;
+const playerGeo = new THREE.BoxGeometry(0.8, playerHeight, 0.8);
+const playerMat = new THREE.MeshStandardMaterial({ color:0x0077ff });
+const player = new THREE.Mesh(playerGeo, playerMat);
+player.position.set(0, playerHeight/2, 0);
+player.castShadow = true;
+scene.add(player);
+
+// TPSカメラ
+const camOffset = new THREE.Vector3(0,5,-10);
+function updateCamera(){
+    const offset = camOffset.clone().applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
+    camera.position.copy(player.position).add(offset);
+    camera.lookAt(player.position);
+}
+
+// ----------------------------
+// 建物データロード（Overpass API）
+// ----------------------------
+const bbox = [35.677,139.764,35.683,139.770]; // 東京駅周辺
+const query = `
+[out:json][timeout:25];
+(
+  way["building"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+);
+out body;
+>;
+out skel qt;
+`;
+
+fetch('https://overpass-api.de/api/interpreter', {
+    method:'POST',
+    body: query
+})
+.then(res=>res.json())
+.then(data=>{
+    const nodes = {};
+    data.elements.forEach(e=>{ if(e.type==="node") nodes[e.id]=e; });
+
+    const buildings = [];
+    data.elements.forEach(e=>{
+        if(e.type==="way" && e.tags && e.tags.building){
+            const coords = e.nodes.map(id=>{
+                const n = nodes[id];
+                return [(n.lon-bbox[1])*111000, (n.lat-bbox[0])*111000];
+            });
+
+            // 高さ取得（height > building:levels*3 > default 20）
+            let height = 20; // default
+            if(e.tags.height){
+                const h = parseFloat(e.tags.height.replace('m',''));
+                if(!isNaN(h)) height = h;
+            } else if(e.tags['building:levels']){
+                const lv = parseFloat(e.tags['building:levels']);
+                if(!isNaN(lv)) height = lv*3;
+            }
+
+            buildings.push({coords, height});
+        }
     });
 
-    // 衛星・地図タイルを追加（OpenStreetMap 標準タイルを使用）
-    osmb.addMapTiles(
-      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {
-        attribution: '© OpenStreetMap contributors'
-      }
-    );
-
-    // 建物の 3D データタイル（GeoJSON）を追加
-    osmb.addGeoJSONTiles(
-      'https://data.osmbuildings.org/0.2/anonymous/tile/{z}/{x}/{y}.json'
-    );
-
-    // ----------------------------
-    // ② Three.js セットアップ
-    // ----------------------------
-    const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.domElement.style.position = 'absolute';
-    renderer.domElement.style.top = '0';
-    renderer.domElement.style.left = '0';
-    document.body.appendChild(renderer.domElement);
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 2000);
-
-    // ライト
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(5,10,3);
-    scene.add(light);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-    scene.add(ambient);
-
-    // キャラクター（Box）
-    const playerGeo = new THREE.BoxGeometry(1,2,1);
-    const playerMat = new THREE.MeshStandardMaterial({ color:0x00ffcc });
-    const player = new THREE.Mesh(playerGeo, playerMat);
-    player.position.set(0,1,0);
-    scene.add(player);
-
-    // カメラ追随関数
-    function updateCamera(){
-      const offset = new THREE.Vector3(0,5,-10);
-      offset.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
-      camera.position.copy(player.position).add(offset);
-      camera.lookAt(player.position);
+    // テクスチャ作成（簡易窓）
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle="#8888aa"; ctx.fillRect(0,0,64,64);
+    ctx.fillStyle="#222222";
+    for(let y=2;y<64;y+=8){
+        for(let x=2;x<64;x+=8){
+            ctx.fillRect(x,y,4,4);
+        }
     }
+    const tex = new THREE.CanvasTexture(canvas);
 
-    // 操作変数
-    const keys = {};
-    document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-    document.addEventListener('keyup',   e => keys[e.key.toLowerCase()] = false);
-
-    let joyX=0, joyY=0;
-    const joystick = nipplejs.create({
-      zone: document.body,
-      mode: 'static',
-      position: { left:80, bottom:80 },
-      color:'white'
+    // Three.js に建物追加
+    const buildingMeshes = [];
+    buildings.forEach(b=>{
+        const shape = new THREE.Shape();
+        b.coords.forEach((p,i)=>{
+            if(i===0) shape.moveTo(p[0], p[1]);
+            else shape.lineTo(p[0], p[1]);
+        });
+        const extrudeSettings = { depth: b.height, bevelEnabled:false };
+        const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        const mat = new THREE.MeshStandardMaterial({ map: tex });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = 0;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+        buildingMeshes.push(mesh);
     });
-    joystick.on('move', (evt, data) => {
-      joyX = data.vector.x;
-      joyY = -data.vector.y;
-    });
-    joystick.on('end', ()=>{ joyX=0; joyY=0; });
 
-    // アニメーションループ
-    function animate(){
-      requestAnimationFrame(animate);
+    window.buildingMeshes = buildingMeshes;
+});
 
-      // 移動入力
-      let moveX = 0, moveZ = 0;
-      if (keys['w']) moveZ -= 1;
-      if (keys['s']) moveZ += 1;
-      if (keys['a']) moveX -= 1;
-      if (keys['d']) moveX += 1;
-      moveX += joyX;
-      moveZ += joyY;
+// ----------------------------
+// 操作
+// ----------------------------
+const keys = {};
+window.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
+window.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
 
-      if (Math.hypot(moveX, moveZ) > 0.001) {
-        const angle = Math.atan2(moveX, moveZ);
+let joyX=0, joyY=0;
+nipplejs.create({
+    zone:document.body, mode:'static', position:{left:80,bottom:80}, color:'gray', size:100
+}).on('move',(evt,data)=>{ joyX=data.vector.x; joyY=-data.vector.y; })
+  .on('end',()=>{ joyX=0; joyY=0; });
+
+// ----------------------------
+// 衝突判定
+function willCollide(nextPos){
+    if(!window.buildingMeshes) return false;
+    const halfY = playerHeight/2;
+    const tmpBB = new THREE.Box3(
+        new THREE.Vector3(nextPos.x-0.4, nextPos.y-halfY, nextPos.z-0.4),
+        new THREE.Vector3(nextPos.x+0.4, nextPos.y+halfY, nextPos.z+0.4)
+    );
+    for(let i=0;i<window.buildingMeshes.length;i++){
+        const bb = new THREE.Box3().setFromObject(window.buildingMeshes[i]);
+        if(tmpBB.intersectsBox(bb)) return true;
+    }
+    return false;
+}
+
+// ----------------------------
+// アニメーションループ
+// ----------------------------
+const clock = new THREE.Clock();
+function animate(){
+    requestAnimationFrame(animate);
+    const dt = Math.min(0.05, clock.getDelta());
+
+    let mvX=0, mvZ=0;
+    if(keys['w']||keys['arrowup']) mvZ -= 1;
+    if(keys['s']||keys['arrowdown']) mvZ += 1;
+    if(keys['a']||keys['arrowleft']) mvX -= 1;
+    if(keys['d']||keys['arrowright']) mvX += 1;
+    mvX += joyX; mvZ += joyY;
+
+    if(Math.hypot(mvX,mvZ)>0.001){
+        const nx = mvX/Math.hypot(mvX,mvZ);
+        const nz = mvZ/Math.hypot(mvX,mvZ);
+        const angle = Math.atan2(nx,nz);
         player.rotation.y = angle;
-        player.position.x += Math.sin(angle) * 0.1;
-        player.position.z += Math.cos(angle) * 0.1;
-      }
-
-      updateCamera();
-      renderer.render(scene, camera);
+        const next = player.position.clone();
+        const speed = 6;
+        next.x += nx*speed*dt;
+        next.z += nz*speed*dt;
+        if(!willCollide(next)) player.position.copy(next);
     }
-    animate();
 
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
+    updateCamera();
+    renderer.render(scene,camera);
+}
+animate();
 
+window.addEventListener('resize', ()=>{
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+});
+
+</script>
 </body>
 </html>
