@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM 3D Sample</title>
+<title>OSM 3D 正確配置サンプル</title>
 <style>
 body { margin:0; overflow:hidden; }
 canvas { display:block; }
@@ -16,7 +16,7 @@ button { margin: 2px; }
 <body>
 <div id="ui">
   <button onclick="setCameraTPS()">TPS視点</button>
-  <button onclick="setCameraOblique()">俯瞰</button>
+  <button onclick="setCameraOblique()">斜め俯瞰</button>
   <button onclick="setCameraTop()">上空俯瞰</button>
 </div>
 
@@ -64,7 +64,18 @@ for(let y=2;y<64;y+=8){
 const windowTex = new THREE.CanvasTexture(canvas);
 
 // ----------------------------
-// ③ OSM 建物データロード
+// ③ 緯度経度 → Three.js X,Z 変換
+function latLonToXZ(lat, lon, refLat, refLon){
+    const R = 6378137; // 地球半径[m]
+    const dLat = (lat - refLat) * Math.PI / 180;
+    const dLon = (lon - refLon) * Math.PI / 180;
+    const x = dLon * R * Math.cos(refLat * Math.PI / 180); // 経度方向に緯度補正
+    const z = -dLat * R; // 緯度方向（南北逆にして Z 奥行き）
+    return [x, z];
+}
+
+// ----------------------------
+// ④ OSM 建物データロード
 // 東京駅周辺 0.01度四方
 const minLat = 35.677, maxLat = 35.683;
 const minLon = 139.764, maxLon = 139.770;
@@ -91,7 +102,7 @@ fetch('https://overpass-api.de/api/interpreter',{
     if(e.type==="way" && e.tags && e.tags.building){
       const coords = e.nodes.map(id=>{
         const n = nodes[id];
-        return [(n.lon-minLon)*111000, (n.lat-minLat)*111000]; // 緯度経度→X,Z
+        return latLonToXZ(n.lat, n.lon, minLat, minLon);
       });
 
       let height = 20; // デフォルト
@@ -115,8 +126,7 @@ fetch('https://overpass-api.de/api/interpreter',{
 });
 
 // ----------------------------
-// ④ カメラ位置切替
-// ----------------------------
+// ⑤ カメラ位置切替
 function setCameraTPS(){
   camera.position.set(50,30,100);
   camera.lookAt(50,0,50);
@@ -134,8 +144,7 @@ function setCameraTop(){
 setCameraOblique();
 
 // ----------------------------
-// ⑤ レンダリングループ
-// ----------------------------
+// ⑥ レンダリングループ
 function animate(){
   requestAnimationFrame(animate);
   renderer.render(scene,camera);
