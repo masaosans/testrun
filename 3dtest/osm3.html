@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM 3D Buildings + Multi Tile Loader</title>
+<title>OSM 3D Buildings + Tile Loader</title>
 <style>
   body { margin: 0; overflow: hidden; }
   #ui {
@@ -19,7 +19,7 @@
 <body>
 
 <div id="ui">
-  <button id="loadButton">OSM建物をロード（複数タイル）</button>
+  <button id="loadButton">OSM建物をロード（16タイル）</button>
 </div>
 
 <!-- three.js（グローバル版） -->
@@ -39,7 +39,12 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa0c4ff);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+const camera = new THREE.PerspectiveCamera(
+  60,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  5000
+);
 camera.position.set(0, 200, 200);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -58,7 +63,7 @@ ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
 // ==============================
-// タイル座標 → bbox
+// タイル座標 → 経度緯度範囲
 // ==============================
 function tile2bbox(x, y, z) {
   const n = Math.pow(2, z);
@@ -72,7 +77,7 @@ function tile2bbox(x, y, z) {
 }
 
 // ==============================
-// 建物 GeoJSON → 3D
+// OSM 建物 GeoJSON → THREE.js 3D
 // ==============================
 function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
   json.features.forEach(f => {
@@ -82,8 +87,8 @@ function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
     const shape = new THREE.Shape();
 
     coords.forEach((c, i) => {
-      const px = (c[0] - offsetX) * 10000;
-      const pz = (c[1] - offsetZ) * 10000;
+      const px = (c[0] - offsetX) * 10000; 
+      const pz = (c[1] - offsetZ) * 10000; 
       if (i === 0) shape.moveTo(px, pz);
       else shape.lineTo(px, pz);
     });
@@ -92,9 +97,15 @@ function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
       ? parseFloat(f.properties.height)
       : (f.properties["building:levels"] ? f.properties["building:levels"] * 3 : 10);
 
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
-    const mat = new THREE.MeshPhongMaterial({ color: 0x6699ff });
-    const mesh = new THREE.Mesh(geo, mat);
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: h,
+      bevelEnabled: false
+    });
+
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshPhongMaterial({ color: 0x6699ff })
+    );
 
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = h / 2;
@@ -104,68 +115,65 @@ function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
 }
 
 // ==============================
-// Overpass: 小タイル単位でロード
+// 1タイル読み込み
 // ==============================
 async function loadTile(z, x, y) {
   const [lon1, lat1, lon2, lat2] = tile2bbox(x, y, z);
 
-  const url =
-    "https://overpass-api.de/api/interpreter?data=" +
-    encodeURIComponent(`
-      [out:json];
-      (
-        way["building"](${lat1},${lon1},${lat2},${lon2});
-      );
-      (._;>;);
-      out geom;
-    `);
+  const query = `
+    [out:json];
+      way["building"](${lat1},${lon1},${lat2},${lon2});
+    (._;>;);
+    out geom;
+  `;
 
-  console.log("➡ fetch:", url);
+  const url = "https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(query);
+
+  console.log("▶ Overpass:", url);
 
   const res = await fetch(url);
   if (!res.ok) {
-    console.warn("❌ fetch failed", url);
+    console.warn("⚠ Overpass エラー:", res.status);
     return;
   }
 
-  const data = await res.json();
-  addBuildingFromGeoJSON(data, lon1, lat1);
+  const json = await res.json();
+  addBuildingFromGeoJSON(json, lon1, lat1);
 }
 
 // ==============================
-// ■指定タイル(Z=16) → 下位タイル(Z=18)に分割して大量取得
+// Z=16 → Z=18 に分割して 16 タイルを読み込む
 // ==============================
-async function loadSubTiles() {
-  const Z_BASE = 16;
-  const X = 58269;  // 渋谷付近
+async function loadTileSplit() {
+  const Z = 16;
+  const X = 58269; // 渋谷
   const Y = 25805;
 
-  const Z_SUB = 18;  // ← 4倍拡大（1タイル → 16タイル）
-  const DIFF = Math.pow(2, Z_SUB - Z_BASE);  // =4
+  const Z2 = 18;            // 4倍 (16タイル)
+  const scale = 1 << (Z2 - Z); // 2^(18-16)=4
 
-  for (let dx = 0; dx < DIFF; dx++) {
-    for (let dy = 0; dy < DIFF; dy++) {
-      const x2 = X * DIFF + dx;
-      const y2 = Y * DIFF + dy;
+  for (let dx = 0; dx < scale; dx++) {
+    for (let dy = 0; dy < scale; dy++) {
 
-      console.log(`Loading sub tile: z=${Z_SUB} x=${x2} y=${y2}`);
+      const x2 = X * scale + dx;
+      const y2 = Y * scale + dy;
 
-      await loadTile(Z_SUB, x2, y2);
+      await loadTile(Z2, x2, y2);
 
-      await new Promise(r => setTimeout(r, 300)); // API負荷軽減
+      await new Promise(r => setTimeout(r, 300)); // Overpass保護
     }
   }
 }
 
 // ==============================
-// UI
+// UI ボタン
 // ==============================
 document.getElementById("loadButton").onclick = () => {
-  loadSubTiles();
+  loadTileSplit();
 };
 
 // ==============================
-// Render loop
+// Render
 // ==============================
 function animate() {
   requestAnimationFrame(animate);
