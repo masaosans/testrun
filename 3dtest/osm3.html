@@ -1,187 +1,309 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>OSM 3D Buildings + Tile Loader</title>
+<meta charset="UTF-8" />
+<title>OSM 3D Buildings - Robust Multi-tile Loader</title>
 <style>
-  body { margin: 0; overflow: hidden; }
+  body{ margin:0; overflow:hidden; font-family: sans-serif; }
   #ui {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 10;
-    background: rgba(255,255,255,0.8);
-    padding: 8px;
-    border-radius: 6px;
+    position: absolute; left: 10px; top: 10px; z-index: 20;
+    background: rgba(255,255,255,0.9); padding: 10px; border-radius: 6px;
   }
+  #log { width: 360px; height: 200px; overflow:auto; font-size:12px; margin-top:8px; }
 </style>
 </head>
 <body>
-
 <div id="ui">
-  <button id="loadButton">OSM建物をロード（16タイル）</button>
+  <div>
+    <button id="startBtn">ロード開始（再帰分割＋フェイルオーバー）</button>
+    <button id="stopBtn">中断</button>
+  </div>
+  <div style="margin-top:6px;">
+    タイル Z(base): <input id="baseZ" value="16" style="width:56px" />
+    X: <input id="baseX" value="58269" style="width:80px" />
+    Y: <input id="baseY" value="25805" style="width:80px" />
+    → sub start Z: <input id="subZ" value="18" style="width:56px" />
+  </div>
+  <div style="margin-top:6px;">
+    Max tiles: <input id="maxTiles" value="300" style="width:80px" />
+    Max retry: <input id="maxRetry" value="2" style="width:60px" />
+    Timeout(ms): <input id="reqTimeout" value="15000" style="width:80px" />
+  </div>
+  <div id="log"></div>
 </div>
 
-<!-- three.js（グローバル版） -->
+<!-- three.js（グローバル） -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<!-- OrbitControls（グローバル版） -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <script>
-
-// ==============================
-// Three.js 初期化
-// ==============================
+/* ===========================
+   Three.js basic init
+   =========================== */
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xa0c4ff);
+scene.background = new THREE.Color(0xa8d0ff);
 
-const camera = new THREE.PerspectiveCamera(
-  60,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  5000
-);
-camera.position.set(0, 200, 200);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 5000);
+camera.position.set(0, 300, 300);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0, 0);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1);
-sun.position.set(200, 300, 200);
+sun.position.set(200, 400, 200);
 scene.add(sun);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(5000, 5000),
-  new THREE.MeshPhongMaterial({ color: 0xdddddd })
-);
-ground.rotation.x = -Math.PI / 2;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(5000,5000), new THREE.MeshPhongMaterial({ color:0xf0f0f0 }));
+ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// ==============================
-// タイル座標 → 経度緯度範囲
-// ==============================
-function tile2bbox(x, y, z) {
+/* ===========================
+   UI / logging
+   =========================== */
+const logEl = document.getElementById('log');
+function log(msg){
+  console.log(msg);
+  const p = document.createElement('div');
+  p.textContent = (new Date()).toLocaleTimeString() + '  ' + msg;
+  logEl.appendChild(p);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+let abortAll = false;
+document.getElementById('stopBtn').onclick = () => { abortAll = true; log('中断要求を受け取りました'); };
+
+/* ===========================
+   tile <-> bbox helpers
+   =========================== */
+function tile2bbox(x, y, z){
   const n = Math.pow(2, z);
   const lon1 = x / n * 360 - 180;
   const lon2 = (x + 1) / n * 360 - 180;
-
-  const lat1 = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
-  const lat2 = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))) * 180 / Math.PI;
-
+  const lat1 = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180/Math.PI;
+  const lat2 = Math.atan(Math.sinh(Math.PI * (1 - 2 * (y + 1) / n))) * 180/Math.PI;
+  // return [minLon, minLat, maxLon, maxLat] consistent with earlier code?
+  // we'll return [lon1, lat2, lon2, lat1] as used before
   return [lon1, lat2, lon2, lat1];
 }
 
-// ==============================
-// OSM 建物 GeoJSON → THREE.js 3D
-// ==============================
-function addBuildingFromGeoJSON(json, offsetX=0, offsetZ=0) {
-  json.features.forEach(f => {
-    if (!f.geometry || f.geometry.type !== "Polygon") return;
+/* ===========================
+   Overpass fetch with timeout & failover
+   =========================== */
+const OVERPASS_HOSTS = [
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass-api.de/api/interpreter"
+];
 
-    const coords = f.geometry.coordinates[0];
-    const shape = new THREE.Shape();
-
-    coords.forEach((c, i) => {
-      const px = (c[0] - offsetX) * 10000; 
-      const pz = (c[1] - offsetZ) * 10000; 
-      if (i === 0) shape.moveTo(px, pz);
-      else shape.lineTo(px, pz);
-    });
-
-    const h = f.properties.height
-      ? parseFloat(f.properties.height)
-      : (f.properties["building:levels"] ? f.properties["building:levels"] * 3 : 10);
-
-    const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: h,
-      bevelEnabled: false
-    });
-
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshPhongMaterial({ color: 0x6699ff })
-    );
-
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = h / 2;
-
-    scene.add(mesh);
-  });
+async function fetchOverpass(query, timeoutMs, maxRetry=2){
+  let lastErr = null;
+  for(let attempt=0; attempt<=maxRetry; attempt++){
+    for(const host of OVERPASS_HOSTS){
+      if(abortAll) throw new Error('aborted');
+      const url = host + "?data=" + encodeURIComponent(query);
+      try {
+        log(`fetch try host=${host}`);
+        const controller = new AbortController();
+        const id = setTimeout(()=> controller.abort(), timeoutMs);
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(id);
+        if(!res.ok){
+          lastErr = new Error(`HTTP ${res.status} from ${host}`);
+          log(`HTTP ${res.status} from ${host}`);
+          continue; // try next host
+        }
+        const json = await res.json();
+        return json;
+      } catch(err){
+        lastErr = err;
+        log(`fetch error host=${host} : ${err.message}`);
+        // try next host
+      }
+    }
+    // rotate, wait a bit (exponential backoff)
+    const waitMs = 500 * Math.pow(2, attempt);
+    log(`全hosts失敗。リトライまで待機 ${waitMs}ms`);
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+  throw lastErr;
 }
 
-// ==============================
-// 1タイル読み込み
-// ==============================
-async function loadTile(z, x, y) {
-  const [lon1, lat1, lon2, lat2] = tile2bbox(x, y, z);
+/* ===========================
+   GeoJSON -> THREE extrusion (improved placement)
+   =========================== */
+function addBuildingFromOverpass(data, baseLon, baseLat, scale=10000){
+  if(!data || !data.elements) return;
+  // Overpass "out geom" returns elements (nodes/ways). Convert to polygons:
+  // We'll build features by grouping way -> list of coords from nodes in 'geometry'.
+  const ways = data.elements.filter(e=> e.type === 'way' && e.geometry);
+  for(const w of ways){
+    const coords = w.geometry.map(pt => [pt.lon, pt.lat]);
+    // Ensure polygon closed - Overpass returns closed ways for building footprints normally
+    if(coords.length < 3) continue;
 
+    const shape = new THREE.Shape();
+    coords.forEach((c, i) => {
+      const lon = c[0], lat = c[1];
+      const px = (lon - baseLon) * scale;
+      const pz = (lat - baseLat) * scale;
+      if(i===0) shape.moveTo(px, pz); else shape.lineTo(px, pz);
+    });
+
+    // determine height
+    let h = 10;
+    if(w.tags){
+      if(w.tags.height) {
+        const hh = parseFloat(String(w.tags.height).replace('m',''));
+        if(!isNaN(hh)) h = hh;
+      } else if(w.tags['building:levels']){
+        const lv = parseFloat(w.tags['building:levels']);
+        if(!isNaN(lv)) h = Math.max(3, lv*3);
+      }
+    }
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled:false });
+    const mat = new THREE.MeshPhongMaterial({ color: 0xccccff, specular:0x111111 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI/2;
+    mesh.position.y = h/2;
+    scene.add(mesh);
+  }
+}
+
+/* ===========================
+   Recursive sub-tile loader
+   - start at (zStart, xStart, yStart)
+   - if a tile fetch fails (504 or other), subdivide that tile to z+1 and retry recursively
+   - global limit MAX_TILES
+   =========================== */
+
+let tilesLoaded = 0;
+let tilesRequested = 0;
+
+async function processTile(z, x, y, options){
+  if(abortAll) return;
+  if(tilesRequested >= options.MAX_TILES) {
+    log(`MAX_TILES reached (${options.MAX_TILES}), skip tile z=${z} x=${x} y=${y}`);
+    return;
+  }
+  tilesRequested++;
+  log(`request tile z=${z} x=${x} y=${y} (requested ${tilesRequested})`);
+
+  const [lon1, lat1, lon2, lat2] = tile2bbox(x,y,z);
+  // Create Overpass query (small bbox). Use out body with geom.
   const query = `
-    [out:json];
-      way["building"](${lat1},${lon1},${lat2},${lon2});
+    [out:json][timeout:25];
+    (
+      way["building"](${lat2},${lon1},${lat1},${lon2});
+    );
     (._;>;);
     out geom;
   `;
 
-  const url = "https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(query);
-
-  console.log("▶ Overpass:", url);
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.warn("⚠ Overpass エラー:", res.status);
-    return;
-  }
-
-  const json = await res.json();
-  addBuildingFromGeoJSON(json, lon1, lat1);
-}
-
-// ==============================
-// Z=16 → Z=18 に分割して 16 タイルを読み込む
-// ==============================
-async function loadTileSplit() {
-  const Z = 16;
-  const X = 58269; // 渋谷
-  const Y = 25805;
-
-  const Z2 = 18;            // 4倍 (16タイル)
-  const scale = 1 << (Z2 - Z); // 2^(18-16)=4
-
-  for (let dx = 0; dx < scale; dx++) {
-    for (let dy = 0; dy < scale; dy++) {
-
-      const x2 = X * scale + dx;
-      const y2 = Y * scale + dy;
-
-      await loadTile(Z2, x2, y2);
-
-      await new Promise(r => setTimeout(r, 300)); // Overpass保護
+  try {
+    const json = await fetchOverpass(query, options.TIMEOUT_MS, options.MAX_RETRY);
+    // if no elements, treat as success (no buildings)
+    if(json && json.elements && json.elements.length>0){
+      addBuildingFromOverpass(json, lon1, lat2, options.SCALE);
+      tilesLoaded++;
+      log(`loaded tile z=${z} x=${x} y=${y}  (loaded ${tilesLoaded})`);
+    } else {
+      log(`tile z=${z} x=${x} y=${y} has no building elements`);
+    }
+  } catch(err){
+    log(`failed tile z=${z} x=${x} y=${y} : ${err.message}`);
+    // If depth allows, subdivide and retry smaller tiles
+    if(z + 1 <= options.MAX_DEPTH){
+      log(`subdividing tile z=${z}x=${x}y=${y} -> z=${z+1}`);
+      const factor = 2;
+      const baseX = x * factor;
+      const baseY = y * factor;
+      for(let dx=0; dx<factor; dx++){
+        for(let dy=0; dy<factor; dy++){
+          if(abortAll) return;
+          await processTile(z+1, baseX+dx, baseY+dy, options);
+          // small delay between sub-requests
+          await new Promise(r=>setTimeout(r, options.PER_REQUEST_DELAY));
+        }
+      }
+    } else {
+      log(`max depth reached for tile z=${z} x=${x} y=${y}, giving up`);
     }
   }
 }
 
-// ==============================
-// UI ボタン
-// ==============================
-document.getElementById("loadButton").onclick = () => {
-  loadTileSplit();
-};
+// Controller: start multi-tile loading from base tile, but subdivide into subZ first
+async function startLoad() {
+  abortAll = false;
+  tilesLoaded = 0;
+  tilesRequested = 0;
+  logEl.innerHTML = '';
 
-// ==============================
-// Render
-// ==============================
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
+  const baseZ = parseInt(document.getElementById('baseZ').value,10);
+  const baseX = parseInt(document.getElementById('baseX').value,10);
+  const baseY = parseInt(document.getElementById('baseY').value,10);
+  const subZ = parseInt(document.getElementById('subZ').value,10);
+
+  const MAX_TILES = parseInt(document.getElementById('maxTiles').value,10) || 300;
+  const MAX_RETRY = parseInt(document.getElementById('maxRetry').value,10) || 2;
+  const REQ_TIMEOUT = parseInt(document.getElementById('reqTimeout').value,10) || 15000;
+
+  const options = {
+    MAX_TILES: MAX_TILES,
+    MAX_RETRY: MAX_RETRY,
+    TIMEOUT_MS: REQ_TIMEOUT,
+    MAX_DEPTH: Math.min(22, subZ+3), // safety
+    SCALE: 10000,
+    PER_REQUEST_DELAY: 250
+  };
+
+  // If subZ > baseZ, we will compute factor and iterate subtiles
+  if(subZ < baseZ){
+    log('subZ must be >= baseZ');
+    return;
+  }
+
+  const factor = 1 << (subZ - baseZ);
+  const startX = baseX * factor;
+  const startY = baseY * factor;
+  log(`Start loading tiles: base Z=${baseZ} -> subZ=${subZ} (factor=${factor}), max tiles=${options.MAX_TILES}`);
+
+  for(let i=0;i<factor;i++){
+    for(let j=0;j<factor;j++){
+      const tx = startX + i;
+      const ty = startY + j;
+      if(abortAll) { log('中断されたので終了'); return; }
+      await processTile(subZ, tx, ty, options);
+      // short pause
+      await new Promise(r=>setTimeout(r, options.PER_REQUEST_DELAY));
+      if(tilesRequested >= options.MAX_TILES) {
+        log('MAX_TILES reached; stopping further requests');
+        return;
+      }
+    }
+  }
+
+  log(`Done. tilesRequested=${tilesRequested}, tilesLoaded=${tilesLoaded}`);
 }
+
+document.getElementById('startBtn').onclick = startLoad;
+
+/* ===========================
+   render loop
+   =========================== */
+function animate(){ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
 animate();
 
+window.addEventListener('resize', ()=>{
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+});
 </script>
 </body>
 </html>
