@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM 3D 広域サンプル</title>
+<title>OSM 3D 広域サンプル (OrbitControls 修正版)</title>
 <style>
 body { margin:0; overflow:hidden; }
 canvas { display:block; }
@@ -21,13 +21,14 @@ button { margin: 2px; }
   <button onclick="setCameraRotate()">自由回転</button>
 </div>
 
-<script src="https://unpkg.com/three@0.159.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.159.0/examples/js/controls/OrbitControls.js"></script>
+<script type="module">
+// ----------------------------
+// モジュール読み込み
+import * as THREE from 'https://unpkg.com/three@0.159.0/build/three.module.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.159.0/examples/jsm/controls/OrbitControls.js';
 
-<script>
 // ----------------------------
-// ① Three.js 基本セットアップ
-// ----------------------------
+// Three.js 初期設定
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
@@ -50,12 +51,12 @@ const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// OrbitControls（自由回転用）
-let controls = new THREE.OrbitControls(camera, renderer.domElement);
+// OrbitControls
+let controls = new OrbitControls(camera, renderer.domElement);
 controls.enabled = false;
 
 // ----------------------------
-// ② 簡易窓テクスチャ
+// 簡易窓テクスチャ
 const canvas = document.createElement('canvas');
 canvas.width = canvas.height = 64;
 const ctx = canvas.getContext('2d');
@@ -69,7 +70,7 @@ for(let y=2;y<64;y+=8){
 const windowTex = new THREE.CanvasTexture(canvas);
 
 // ----------------------------
-// ③ 緯度経度 → Three.js X,Z 変換
+// 緯度経度 → X,Z 変換
 function latLonToXZ(lat, lon, refLat, refLon){
     const R = 6378137;
     const dLat = (lat - refLat) * Math.PI / 180;
@@ -80,7 +81,7 @@ function latLonToXZ(lat, lon, refLat, refLon){
 }
 
 // ----------------------------
-// ④ OSM 建物データロード（広域）
+// OSM 建物データロード（広域）
 const minLat = 35.675, maxLat = 35.695;
 const minLon = 139.760, maxLon = 139.780;
 
@@ -130,7 +131,7 @@ fetch('https://overpass-api.de/api/interpreter',{
 });
 
 // ----------------------------
-// ⑤ カメラ位置切替
+// カメラ切替関数
 function setCameraTPS(){
   controls.enabled = false;
   camera.position.set(500,50,500);
@@ -156,7 +157,7 @@ function setCameraRotate(){
 setCameraOblique();
 
 // ----------------------------
-// ⑥ レンダリングループ
+// レンダリングループ
 function animate(){
   requestAnimationFrame(animate);
   if(controls.enabled) controls.update();
@@ -164,7 +165,6 @@ function animate(){
 }
 animate();
 
-// ----------------------------
 // リサイズ対応
 window.addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight;
