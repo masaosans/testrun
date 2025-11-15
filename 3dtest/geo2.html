@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>OSM Buildings 風 3D 東京サンプル</title>
+<title>渋谷建物 3D (POST 方式)</title>
 <style>
   body { margin:0; overflow:hidden; }
   #ui { position:absolute; top:10px; left:10px; z-index:10;
@@ -97,20 +97,22 @@ function addBuildingsFromGeoJSON(geojson){
 }
 
 // ==========================
-// Overpass API で渋谷周辺の建物を取得
+// POST 方式で Overpass API 取得
 // ==========================
-async function fetchShibuyaBuildings(){
-  const url = "https://overpass-api.de/api/interpreter?data=" +
-    encodeURIComponent(`
-      [out:json][timeout:25];
-      (
-        way["building"](35.658,139.699,35.662,139.703);
-      );
-      (._;>;);
-      out geom;
-    `);
+async function fetchShibuyaBuildingsPOST(){
+  const query = `
+    [out:json][timeout:25];
+    (
+      way["building"](35.658,139.699,35.662,139.703);
+    );
+    (._;>;);
+    out geom;
+  `;
   try{
-    const res = await fetch(url);
+    const res = await fetch("https://overpass-api.de/api/interpreter", {
+      method:"POST",
+      body: query
+    });
     const data = await res.json();
     addBuildingsFromGeoJSON(data);
     console.log("建物ロード完了");
@@ -122,7 +124,7 @@ async function fetchShibuyaBuildings(){
 // ==========================
 // UIボタン
 // ==========================
-document.getElementById('loadBtn').onclick = ()=>{ fetchShibuyaBuildings(); };
+document.getElementById('loadBtn').onclick = ()=>{ fetchShibuyaBuildingsPOST(); };
 
 // ==========================
 // Render loop
@@ -139,7 +141,7 @@ window.addEventListener('resize',()=>{
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
-
 </script>
+
 </body>
 </html>
