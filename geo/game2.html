@@ -28,7 +28,7 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 <script>
 /* ===================== 設定 / ユーティリティ ===================== */
 const ZOOM = 16;
-let LOAD_RADIUS = 1;
+let LOAD_RADIUS = 1;//tileの半径
 document.getElementById('rad').textContent = LOAD_RADIUS;
 
 const MAX_CONCURRENT_FETCH = 3;
@@ -64,17 +64,18 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 100, 150); // 少しキャラクターに近づけた
+camera.position.set(0, 100, 200);
 
+// OrbitControls: allow full rotation incl. up/down (with limits)
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.enablePan = true;
-controls.enableZoom = false; // ズーム操作禁止
-controls.minDistance = 5;
-controls.maxDistance = 1000;
-controls.minPolarAngle = Math.PI * 0.20;
-controls.maxPolarAngle = Math.PI * 0.9;
+controls.enablePan = true; // allow panning as well
+controls.enableZoom = false;
+controls.minDistance = 5;//描画範囲Min　10→
+controls.maxDistance = 1000;//描画範囲Max　2000→
+controls.minPolarAngle = Math.PI * 0.20; // 上限 (tilt up)
+controls.maxPolarAngle = Math.PI * 0.9;  // 下限 (tilt down)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -143,6 +144,7 @@ function createExtrudeMeshFromWay(el){
   else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1) * 3;
   const geo = new THREE.ExtrudeBufferGeometry(shape, { depth: height, bevelEnabled: false });
   geo.rotateX(-Math.PI/2);
+  // safe: compute bbox if available
   if(!geo.boundingBox) geo.computeBoundingBox();
   geo.translate(0, -geo.boundingBox.min.y, 0);
   const mat = new THREE.MeshPhongMaterial({ map: windowTex, color: 0xccccff });
@@ -229,6 +231,7 @@ async function updateTilesAroundCamera(){
 }
 
 /* ===================== Player (small) + Camera behavior ===================== */
+/* scale: set linear scale factor (0.25 => ~1/4 in linear dims) */
 const SCALE = 0.25;
 const baseRadius = 10, baseHeight = 30;
 const radius = baseRadius * SCALE;
@@ -241,23 +244,26 @@ const player = new THREE.Mesh(
 player.position.set(0, height/2, 0);
 scene.add(player);
 
+/* player velocity as vector so jump keeps horizontal velocity */
 const playerVel = new THREE.Vector3(0, 0, 0);
 const targetVel = new THREE.Vector3(0, 0, 0);
-const H_SPEED = 12.0 * SCALE * 4.0;
-const JUMP_SPEED = 18 * SCALE * 4.0;
-const GRAVITY = -80 * SCALE;
+const H_SPEED = 12.0 * SCALE * 4.0; // tune horizontal speed (scaled)　：4.0 * SCALE * 4.0;
+const JUMP_SPEED = 18 * SCALE * 4.0; // tune jump (scaled)
+const GRAVITY = -80 * SCALE; // gravity per second^2 scaled　：-40
 let canJump = true;
 
+/* Time */
 const clock = new THREE.Clock();
 
 /* ===================== Joystick (縦逆) ===================== */
 const joystick = nipplejs.create({ zone: document.getElementById('joy'), mode: 'static', position: { left: 60, top: 60 }, size: 120 });
 let joyX = 0, joyY = 0;
 joystick.on('move', (evt, data) => {
+  // invert vertical so forward = push forward
   const rad = data.angle.radian;
   const force = Math.min(data.force / 50, 1);
   joyX = Math.sin(rad) * force;
-  joyY = -Math.cos(rad) * force;
+  joyY = -Math.cos(rad) * force; // inverted vertical
 });
 joystick.on('end', () => { joyX = 0; joyY = 0; });
 
@@ -265,6 +271,7 @@ joystick.on('end', () => { joyX = 0; joyY = 0; });
 document.getElementById('jumpBtn').addEventListener('touchstart', onJump);
 document.getElementById('jumpBtn').addEventListener('mousedown', onJump);
 function onJump(e){
+  // allow jump while moving: only require canJump true
   if(canJump){
     playerVel.y = JUMP_SPEED;
     canJump = false;
@@ -276,26 +283,31 @@ document.getElementById('attackBtn').addEventListener('click', ()=>{ console.log
 function animate(){
   requestAnimationFrame(animate);
 
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const dt = Math.min(clock.getDelta(), 0.05); // clamp delta
 
-  // --- 修正版: horizontal input -> targetVel (camera-relative) ---
-  if(Math.abs(joyX) > 0.001 || Math.abs(joyY) > 0.001){
+  // --- horizontal input -> targetVel (camera-relative) ---
+  const input = new THREE.Vector3(joyX, 0, joyY);
+  if(input.length() > 0.001){
+    input.normalize();
+    // camera forward (world)
     const camDir = new THREE.Vector3();
     camera.getWorldDirection(camDir);
     camDir.y = 0; camDir.normalize();
-
     const camRight = new THREE.Vector3();
     camRight.crossVectors(new THREE.Vector3(0,1,0), camDir).normalize();
 
     const moveWorld = new THREE.Vector3();
-    moveWorld.addScaledVector(camDir, joyY);   // 上入力 = カメラ正面方向
-    moveWorld.addScaledVector(camRight, joyX); // 右入力 = カメラ右方向
+    moveWorld.addScaledVector(camDir, -input.z); // forward/back relative to camera
+    moveWorld.addScaledVector(camRight, input.x); // left/right relative to camera
     moveWorld.normalize();
 
+    // set horizontal target velocity
     targetVel.x = moveWorld.x * H_SPEED;
     targetVel.z = moveWorld.z * H_SPEED;
 
+    // rotate player to movement direction (smooth)
     const targetAngle = Math.atan2(moveWorld.x, moveWorld.z);
+    // smooth rotate
     const deltaRot = ((targetAngle - player.rotation.y + Math.PI) % (Math.PI*2)) - Math.PI;
     player.rotation.y += deltaRot * 0.25;
   } else {
@@ -303,16 +315,20 @@ function animate(){
     targetVel.z = 0;
   }
 
+  // smooth velocity XZ toward targetVel
   const smooth = Math.min(1, 10 * dt);
   playerVel.x = THREE.MathUtils.lerp(playerVel.x, targetVel.x, smooth);
   playerVel.z = THREE.MathUtils.lerp(playerVel.z, targetVel.z, smooth);
 
+  // integrate physics: horizontal
   player.position.x += playerVel.x * dt;
   player.position.z += playerVel.z * dt;
 
+  // integrate vertical (jump & gravity)
   playerVel.y += GRAVITY * dt;
   player.position.y += playerVel.y * dt;
 
+  // ground collision
   const groundY = height/2;
   if(player.position.y <= groundY){
     player.position.y = groundY;
@@ -320,23 +336,37 @@ function animate(){
     canJump = true;
   }
 
+  // Camera behavior: do NOT overwrite camera position.
+  // Instead, slowly move controls.target toward player position so camera can be freely moved by user.
   const target = new THREE.Vector3().copy(player.position);
-  controls.target.lerp(target, 0.04);
+  controls.target.lerp(target, 0.04); // small factor: camera will follow slowly and user can override
+  // keep camera distance as user set via controls; do NOT force camera.position each frame
 
   controls.update();
 
+  // update tiles (uses controls.target -> lon/lat)
   updateTilesAroundCamera();
 
+  // render
   renderer.render(scene, camera);
 }
 animate();
 
+/* ===================== Tile update functions (camera->tile center) ===================== */
+/* reuse existing updateTilesAroundCamera, cameraToLonLat above in this file. */
+
+/* (the functions fetchOverpassForTile, addTileToScene, etc. remain as defined earlier in the file) */
+/* They are already present above. */
+
+/* ===================== Resize & keyboard ===================== */
 window.addEventListener('resize', ()=>{ renderer.setSize(window.innerWidth, window.innerHeight); camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); });
+
 window.addEventListener('keydown', e=>{
   if(e.key === "+"){ LOAD_RADIUS = Math.min(4, LOAD_RADIUS+1); document.getElementById('rad').textContent = LOAD_RADIUS; }
   if(e.key === "-"){ LOAD_RADIUS = Math.max(0, LOAD_RADIUS-1); document.getElementById('rad').textContent = LOAD_RADIUS; }
 });
 
+/* start queue */
 processQueue();
 
 console.log("Modified OSM + Player (camera-free, small player, jump while moving) started.");
