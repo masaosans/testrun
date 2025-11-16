@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>3D Map Game with Joystick (v0.145)</title>
+<title>3D Game with Smooth Joystick</title>
 <style>
 body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 #info{
@@ -12,8 +12,8 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 /* ジョイスティックUI */
 #joystick{
   position: absolute;
-  bottom: 40px;
-  left: 40px;
+  bottom: 60px; /* 下余白を少し広めに */
+  left: 60px;   /* 左余白も増やす */
   width: 120px;
   height: 120px;
   border-radius: 50%;
@@ -29,6 +29,7 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   top: 30px;
   border-radius: 50%;
   background: rgba(100,100,100,0.6);
+  touch-action: none;
 }
 </style>
 </head>
@@ -44,7 +45,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 800, 1200);
+camera.position.set(0, 200, 500);
 
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -53,6 +54,8 @@ document.body.appendChild(renderer.domElement);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.enableZoom = false;
 
 scene.add(new THREE.AmbientLight(0xffffff,0.6));
 const dir = new THREE.DirectionalLight(0xffffff,0.9);
@@ -79,10 +82,10 @@ const joystick = document.getElementById('joystick');
 const stick = document.getElementById('stick');
 let activeTouch = null;
 
-joystick.addEventListener('touchstart', e=>{
+function handleTouchStart(e){
   activeTouch = e.changedTouches[0].identifier;
-});
-joystick.addEventListener('touchmove', e=>{
+}
+function handleTouchMove(e){
   if(activeTouch===null) return;
   for(const t of e.changedTouches){
     if(t.identifier!==activeTouch) continue;
@@ -94,12 +97,13 @@ joystick.addEventListener('touchmove', e=>{
     const angle = Math.atan2(dy, dx);
     dx = Math.cos(angle)*dist;
     dy = Math.sin(angle)*dist;
+    // DOM更新はtransformだけにしてちらつき防止
     stick.style.transform = `translate(${dx}px, ${dy}px)`;
-    // 上下反転: 上にドラッグで前進
+    // 上下反転: 上で前進
     joystickDir.set(dx/maxDist,0,dy/maxDist*-1);
   }
-});
-joystick.addEventListener('touchend', e=>{
+}
+function handleTouchEnd(e){
   for(const t of e.changedTouches){
     if(t.identifier===activeTouch){
       activeTouch=null;
@@ -107,30 +111,40 @@ joystick.addEventListener('touchend', e=>{
       joystickDir.set(0,0,0);
     }
   }
-});
+}
 
-/* ===================== 移動ループ ===================== */
+joystick.addEventListener('touchstart', handleTouchStart);
+joystick.addEventListener('touchmove', handleTouchMove);
+joystick.addEventListener('touchend', handleTouchEnd);
+joystick.addEventListener('touchcancel', handleTouchEnd);
+
+/* ===================== 移動とカメラ追従 ===================== */
 const speed = 4;
-function updatePlayer(){
-  if(joystickDir.length()>0.1){
-    const camYaw = Math.atan2(camera.position.x-player.position.x, camera.position.z-player.position.z);
-    const cosR = Math.cos(camYaw), sinR = Math.sin(camYaw);
-    const moveX = joystickDir.x*cosR - joystickDir.z*sinR;
-    const moveZ = joystickDir.x*sinR + joystickDir.z*cosR;
-    player.position.x += moveX*speed;
-    player.position.z += moveZ*speed;
-    player.rotation.y = Math.atan2(moveX, moveZ);
-    camera.position.x = player.position.x - 300*Math.sin(player.rotation.y);
-    camera.position.z = player.position.z - 300*Math.cos(player.rotation.y);
-    camera.position.y = player.position.y + 150;
-    controls.target.set(player.position.x, player.position.y+20, player.position.z);
+const camOffset = new THREE.Vector3(0,150,-300);
+
+function updatePlayer(delta){
+  if(joystickDir.length() > 0.1){
+    const move = joystickDir.clone().multiplyScalar(speed);
+    player.position.x += move.x;
+    player.position.z += move.z;
+    player.rotation.y = Math.atan2(move.x, move.z);
   }
+
+  // カメラ滑らか追従
+  const desiredCamPos = player.position.clone().add(camOffset.clone().applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y));
+  camera.position.lerp(desiredCamPos, 0.1);
+  controls.target.lerp(player.position.clone().add(new THREE.Vector3(0,20,0)), 0.1);
 }
 
 /* ===================== アニメーション ===================== */
+let lastTime = performance.now();
 function animate(){
   requestAnimationFrame(animate);
-  updatePlayer();
+  const now = performance.now();
+  const delta = (now-lastTime)/1000;
+  lastTime=now;
+
+  updatePlayer(delta);
   controls.update();
   renderer.render(scene,camera);
 }
