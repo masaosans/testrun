@@ -2,219 +2,277 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D + キャラクター移動統合版</title>
+<title>OSM 3D + キャラ移動統合版</title>
 <style>
-body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
-#info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
-#joystickContainer{position:absolute;bottom:20px;left:40px;width:120px;height:120px;z-index:20;}
-#jumpBtn,#attackBtn{
-  position:absolute;bottom:20px;width:60px;height:60px;border-radius:30px;font-size:18px;
-  background:rgba(255,255,255,0.7);border:none;z-index:21;
-}
-#jumpBtn{right:90px;} #attackBtn{right:20px;}
+  body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
+  #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
+  #jumpBtn,#attackBtn{
+    position:absolute;
+    width:60px;height:60px;
+    border-radius:50%;
+    font-size:16px;color:white;
+    border:none;
+    right:20px;
+    background:rgba(0,0,0,0.6);
+    z-index:30;
+  }
+  #jumpBtn{bottom:100px;}
+  #attackBtn{bottom:20px;}
+  #joystickContainer{
+    position:absolute; left:40px; bottom:40px; width:120px; height:120px; z-index:30;
+  }
 </style>
 </head>
 <body>
-<div id="info">OSM 3D + キャラクター移動サンプル</div>
-<div id="joystickContainer"></div>
+<div id="info">
+  ドラッグで移動 / ホイールでズーム。Tile Z=16, radius = <span id="rad">1</span>
+</div>
 <button id="jumpBtn">Jump</button>
 <button id="attackBtn">Attack</button>
+<div id="joystickContainer"></div>
 
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.8.3/dist/nipplejs.min.js"></script>
+
 <script>
-/* ===================== Three.js 基本 ===================== */
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xa8dffb);
+/* ===================== 設定 ===================== */
+const ZOOM = 16;
+let LOAD_RADIUS = 1;
+document.getElementById('rad').textContent = LOAD_RADIUS;
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 80, 120);
+const MAX_CONCURRENT_FETCH = 3;
+const OVERPASS_RETRY = 2;
+const OVERPASS_DELAY_MS = 300;
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
+/* ===================== WebMercator / Tile ===================== */
+const R = 6378137;
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
+function lonToMercX(lon){ return R * deg2rad(lon); }
+function latToMercY(lat){ return R * Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/2)); }
+function mercXToLon(x){ return rad2deg(x / R); }
+function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
+function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
+
+function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
+function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z); return Math.atan(Math.sinh(n)) * 180 / Math.PI; }
+function lonToTileX(lon, zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
+function latToTileY(lat, zoom){ const a = Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180)); return Math.floor((1 - a/Math.PI)/2*Math.pow(2,zoom)); }
+
+/* ===================== ORIGIN ===================== */
+const INIT_CENTER_LON = 139.6917;
+const INIT_CENTER_LAT = 35.6895;
+const ORIGIN_M = lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
+
+/* ===================== Three.js 初期化 ===================== */
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping=true; controls.dampingFactor=0.08;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa8dffb);
 
-scene.add(new THREE.AmbientLight(0xffffff,0.6));
-const dir = new THREE.DirectionalLight(0xffffff,0.9);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
+camera.position.set(0, 800, 1200);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.9);
 dir.position.set(500,1000,500);
 scene.add(dir);
 
-/* ===================== OSM 3Dマップ設定 ===================== */
-const ZOOM=16, LOAD_RADIUS=1;
-const R=6378137;
-function deg2rad(d){return d*Math.PI/180;}
-function lonToMercX(lon){return R*deg2rad(lon);}
-function latToMercY(lat){return R*Math.log(Math.tan(Math.PI/4+deg2rad(lat)/2));}
-function lonLatToMerc(lon,lat){return {x:lonToMercX(lon),y:latToMercY(lat)};}
+/* ===================== キャラクター ===================== */
+const player = new THREE.Mesh(
+  new THREE.CapsuleBufferGeometry(10,20,4,8),
+  new THREE.MeshStandardMaterial({color:0xff0000})
+);
+player.position.set(0,10,0);
+scene.add(player);
 
-const INIT_CENTER_LON=139.6917;
-const INIT_CENTER_LAT=35.6895;
-const ORIGIN_M=lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
+let velocity = new THREE.Vector3();
+let onGround = true;
+const GRAVITY = -0.5;
+const JUMP_VELOCITY = 12;
 
-const loadedTiles=new Map(), fetchQueue=[], geoCache=new Map(), imgCache=new Map();
-let activeFetches=0;
-const OVERPASS_URL="https://overpass-api.de/api/interpreter";
+function movePlayer(dx,dz){
+  const dir = new THREE.Vector3(dx,0,dz);
+  if(dir.length()>0){
+    dir.normalize().applyAxisAngle(new THREE.Vector3(0,1,0),camera.rotation.y);
+    velocity.x = dir.x*4;
+    velocity.z = dir.z*4;
+  } else {
+    velocity.x *= 0.8;
+    velocity.z *= 0.8;
+  }
+}
 
-/* タイルbbox */
-function tile2lon(x,z){return x/Math.pow(2,z)*360-180;}
-function tile2lat(y,z){const n=Math.PI-2*Math.PI*y/Math.pow(2,z);return Math.atan(Math.sinh(n))*180/Math.PI;}
-function lonToTileX(lon,zoom){return Math.floor((lon+180)/360*Math.pow(2,zoom));}
-function latToTileY(lat,zoom){const a=Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180)); return Math.floor((1-a/Math.PI)/2*Math.pow(2,zoom));}
-function tileBBoxLonLat(x,y,z){return {west:tile2lon(x,z),north:tile2lat(y,z),east:tile2lon(x+1,z),south:tile2lat(y+1,z)};}
-function bboxToOverpassQuery(bbox){return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`;}
+/* ===================== ジョイスティック ===================== */
+let joyDir = {x:0,z:0};
+const joystick = nipplejs.create({zone:document.getElementById('joystickContainer'),mode:'static',position:{left:60,top:60},color:'gray'});
+joystick.on('move', (evt,data)=>{ joyDir.x=data.vector.x; joyDir.z=-data.vector.y; });
+joystick.on('end', ()=>{ joyDir.x=0; joyDir.z=0; });
+
+/* ===================== ジャンプボタン ===================== */
+document.getElementById('jumpBtn').addEventListener('click', ()=>{
+  if(onGround){ velocity.y = JUMP_VELOCITY; onGround=false; }
+});
+
+/* ===================== OSM 3D マップ ===================== */
+const loadedTiles = new Map();
+const fetchQueue = [];
+let activeFetches = 0;
+const geoCache = new Map();
+const imgCache = new Map();
+const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
+
+function tileBBoxLonLat(x,y,z){ return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) }; }
+function bboxToOverpassQuery(bbox){ return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`; }
 
 async function fetchOverpassForTile(x,y,z,tries=0){
-    const key=`${x}_${y}`; if(geoCache.has(key)) return geoCache.get(key);
-    const bbox=tileBBoxLonLat(x,y,z);
-    const query=bboxToOverpassQuery(bbox);
-    try{
-        activeFetches++;
-        const res=await fetch(OVERPASS_URL,{method:"POST",body:query});
-        if(!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json=await res.json();
-        const data={bbox,json}; geoCache.set(key,data); return data;
-    }catch(err){
-        if(tries<2){await new Promise(r=>setTimeout(r,500*Math.pow(2,tries))); return fetchOverpassForTile(x,y,z,tries+1);}
-        else return null;
-    }finally{activeFetches--;}
+  const key = `${x}_${y}`;
+  if(geoCache.has(key)) return geoCache.get(key);
+  const bbox = tileBBoxLonLat(x,y,z);
+  const query = bboxToOverpassQuery(bbox);
+  try{
+    activeFetches++;
+    const res = await fetch(OVERPASS_URL,{method:'POST',body:query});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const data = {bbox,json};
+    geoCache.set(key,data);
+    return data;
+  } catch(e){
+    if(tries<OVERPASS_RETRY){ await new Promise(r=>setTimeout(r,500*Math.pow(2,tries))); return fetchOverpassForTile(x,y,z,tries+1); }
+    else return null;
+  } finally{ activeFetches--; }
 }
-function enqueueFetch(fn){return new Promise(resolve=>{fetchQueue.push({fn,resolve});processQueue();});}
-function processQueue(){if(activeFetches>=3) return; const job=fetchQueue.shift(); if(!job) return; job.fn().then(r=>job.resolve(r)).finally(()=>setTimeout(processQueue,300));}
 
-/* ===================== タイル作成 ===================== */
-function mercToWorld(mx,my){return {x:mx-ORIGIN_M.x,z:-(my-ORIGIN_M.y)};}
+function enqueueFetch(fn){ return new Promise(resolve=>{ fetchQueue.push({fn,resolve}); processQueue(); }); }
+function processQueue(){ if(activeFetches>=MAX_CONCURRENT_FETCH) return; const job=fetchQueue.shift(); if(!job) return; job.fn().then(r=>job.resolve(r)).finally(()=>setTimeout(processQueue,OVERPASS_DELAY_MS)); }
+
+function mercToWorld(mx,my){ return { x: mx-ORIGIN_M.x, z: -(my-ORIGIN_M.y) }; }
+
 function addFloorMeshToGroup(tex,bbox,group){
-    const westMx=lonToMercX(bbox.west), eastMx=lonToMercX(bbox.east);
-    const northMy=latToMercY(bbox.north), southMy=latToMercY(bbox.south);
-    const mercW=eastMx-westMx, mercH=northMy-southMy;
-    const centerX=(westMx+eastMx)/2-ORIGIN_M.x;
-    const centerZ=-((southMy+northMy)/2-ORIGIN_M.y);
-    const plane=new THREE.Mesh(new THREE.PlaneGeometry(mercW,mercH),new THREE.MeshPhongMaterial({map:tex}));
-    plane.rotation.x=-Math.PI/2; plane.position.set(centerX,0,centerZ); group.add(plane);
+  const west=lonToMercX(bbox.west), east=lonToMercX(bbox.east);
+  const north=latToMercY(bbox.north), south=latToMercY(bbox.south);
+  const w=east-west, h=north-south;
+  const centerX=(west+east)/2-ORIGIN_M.x, centerZ=-((south+north)/2-ORIGIN_M.y);
+  const plane=new THREE.Mesh(new THREE.PlaneBufferGeometry(w,h),new THREE.MeshPhongMaterial({map:tex}));
+  plane.rotation.x=-Math.PI/2;
+  plane.position.set(centerX,0,centerZ);
+  group.add(plane);
 }
 
-function createExtrudeMeshFromWay(el){
-    const shape=new THREE.Shape();
-    for(let i=0;i<el.geometry.length;i++){
-        const pt=el.geometry[i];
-        const m=lonLatToMerc(pt.lon,pt.lat);
-        const w=mercToWorld(m.x,m.y);
-        if(i===0) shape.moveTo(w.x,w.z); else shape.lineTo(w.x,w.z);
-    }
-    let height=10;
-    if(el.tags.height) height=parseFloat(String(el.tags.height).replace('m',''))||height;
-    else if(el.tags["building:levels"]) height=(parseFloat(el.tags["building:levels"])||1)*3;
-    const geo=new THREE.ExtrudeBufferGeometry(shape,{depth:height,bevelEnabled:false});
-    geo.rotateX(-Math.PI/2);
-    geo.translate(0,-geo.boundingBox.min.y,0);
-    return new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0xccccff}));
+function createBuildingLOD(el){
+  let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+  for(const pt of el.geometry){
+    const m=lonLatToMerc(pt.lon,pt.lat);
+    const w=mercToWorld(m.x,m.y);
+    if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
+    if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
+  }
+  const sx=Math.max(1,maxX-minX), sz=Math.max(1,maxZ-minZ), cx=(minX+maxX)/2, cz=(minZ+maxZ)/2;
+  const height=10;
+  const geo=new THREE.BoxBufferGeometry(sx,height,sz);
+  const mat=new THREE.MeshPhongMaterial({color:0x999999});
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.position.set(cx,height/2,cz);
+  return mesh;
 }
 
 function addTileToScene(x,y,z,data){
-    const key=`${x}_${y}`; if(loadedTiles.has(key)) return;
-    const group=new THREE.Group(); group.userData={x,y,z,bbox:data.bbox};
-    const tileUrl=`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-    if(imgCache.has(tileUrl)){addFloorMeshToGroup(imgCache.get(tileUrl),data.bbox,group);}
-    else {new THREE.TextureLoader().load(tileUrl,tex=>{tex.flipY=false; imgCache.set(tileUrl,tex); addFloorMeshToGroup(tex,data.bbox,group);});}
-    (data.json.elements||[]).forEach(el=>{if(el.type==="way"&&el.geometry) group.add(createExtrudeMeshFromWay(el));});
-    scene.add(group); loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
+  const key=`${x}_${y}`;
+  if(loadedTiles.has(key)) return;
+  const group=new THREE.Group();
+  group.userData={x,y,z,bbox:data.bbox};
+  const tileUrl=`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  if(imgCache.has(tileUrl)) addFloorMeshToGroup(imgCache.get(tileUrl),data.bbox,group);
+  else new THREE.TextureLoader().load(tileUrl,tex=>{ tex.flipY=false; imgCache.set(tileUrl,tex); addFloorMeshToGroup(tex,data.bbox,group); });
+
+  const els=data.json.elements||[];
+  for(const el of els){ if(el.type!=='way'||!el.geometry) continue; try{ group.add(createBuildingLOD(el)); }catch(e){ console.warn(e); } }
+  scene.add(group);
+  loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
 }
 
-/* タイル管理 */
 function unloadFarTiles(cx,cy){
-    for(const [key,info] of Array.from(loadedTiles)){
-        const [tx,ty]=key.split("_").map(n=>parseInt(n,10));
-        if(Math.abs(tx-cx)>LOAD_RADIUS+1||Math.abs(ty-cy)>LOAD_RADIUS+1){
-            scene.remove(info.group);
-            info.group.traverse(obj=>{if(obj.geometry)obj.geometry.dispose(); if(obj.material)Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose();});
-            loadedTiles.delete(key);
-        }
+  for(const [key,info] of Array.from(loadedTiles)){
+    const [tx,ty]=key.split('_').map(n=>parseInt(n,10));
+    if(Math.abs(tx-cx)>LOAD_RADIUS+1 || Math.abs(ty-cy)>LOAD_RADIUS+1){
+      scene.remove(info.group);
+      info.group.traverse(obj=>{ if(obj.geometry) obj.geometry.dispose(); if(obj.material) Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose(); });
+      loadedTiles.delete(key);
     }
+  }
 }
 
-/* カメラ中心取得 */
-function cameraToLonLat(){const tx=controls.target.x; const tz=controls.target.z; const m={x:tx+ORIGIN_M.x, y:-(tz)+ORIGIN_M.y}; return {lon:mercXToLon(m.x), lat:mercYToLat(m.y)};}
+function cameraToLonLat(){
+  const tx=controls.target.x, tz=controls.target.z;
+  const m={x:tx+ORIGIN_M.x, y:-(tz)+ORIGIN_M.y};
+  return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
+}
 
-/* タイル更新 */
 let lastUpdate=0;
+const MIN_UPDATE_INTERVAL=1200;
 async function updateTilesAroundCamera(){
-    const now=performance.now();
-    if(now-lastUpdate<1200) return;
-    lastUpdate=now;
-    const center=cameraToLonLat();
-    const cx=lonToTileX(center.lon,ZOOM), cy=latToTileY(center.lat,ZOOM);
-    unloadFarTiles(cx,cy);
-    for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
-        for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
-            const tx=cx+dx, ty=cy+dy, key=`${tx}_${ty}`;
-            if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
-            enqueueFetch(async()=>{const res=await fetchOverpassForTile(tx,ty,ZOOM); if(res)addTileToScene(tx,ty,ZOOM,res); return res;});
-        }
+  const now=performance.now();
+  if(now-lastUpdate<MIN_UPDATE_INTERVAL) return;
+  lastUpdate=now;
+  const center=cameraToLonLat();
+  const cx=lonToTileX(center.lon, ZOOM);
+  const cy=latToTileY(center.lat, ZOOM);
+  unloadFarTiles(cx,cy);
+  for(let dx=-LOAD_RADIUS;dx<=LOAD_RADIUS;dx++){
+    for(let dy=-LOAD_RADIUS;dy<=LOAD_RADIUS;dy++){
+      const tx=cx+dx, ty=cy+dy;
+      const key=`${tx}_${ty}`;
+      if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
+      enqueueFetch(async()=>{ const res=await fetchOverpassForTile(tx,ty,ZOOM); if(res) addTileToScene(tx,ty,ZOOM,res); return res; });
     }
+  }
 }
-
-/* ===================== キャラクター ===================== */
-const playerSpeed=0.7, jumpPower=1.2, gravity=0.04;
-let velocityY=0, onGround=true;
-
-const playerMat=new THREE.MeshPhongMaterial({color:0xff5555});
-const radius=3, height=6;
-const cyl=new THREE.CylinderBufferGeometry(radius,radius,height,8);
-const sphereTop=new THREE.SphereBufferGeometry(radius,8,8); sphereTop.translate(0,height/2,0);
-const sphereBottom=new THREE.SphereBufferGeometry(radius,8,8); sphereBottom.translate(0,-height/2,0);
-const mergedGeom=THREE.BufferGeometryUtils.mergeBufferGeometries([cyl,sphereTop,sphereBottom]);
-const player=new THREE.Mesh(mergedGeom,playerMat);
-player.position.set(0,height/2,0); scene.add(player);
-
-/* ===================== ジョイスティック ===================== */
-const joystick=nipplejs.create({zone:document.getElementById('joystickContainer'),mode:'static',position:{left:'60px',top:'60px'},size:100});
-let moveX=0, moveZ=0;
-joystick.on('move',evt=>{moveX=Math.sin(evt.angle.radian)*evt.distance*0.02; moveZ=Math.cos(evt.angle.radian)*evt.distance*0.02;});
-joystick.on('end',()=>{moveX=0; moveZ=0;});
-
-/* ジャンプボタン */
-document.getElementById('jumpBtn').addEventListener('click',()=>{
-    if(onGround){velocityY=jumpPower; onGround=false;}
-});
 
 /* ===================== アニメーション ===================== */
 function animate(){
-    requestAnimationFrame(animate);
+  requestAnimationFrame(animate);
 
-    // 移動
-    const dir=new THREE.Vector3(moveX,0,moveZ);
-    if(dir.length()>0){
-        dir.normalize();
-        // カメラ方向に合わせて
-        const angle=Math.atan2(camera.position.x-player.position.x,camera.position.z-player.position.z);
-        player.position.x+=dir.x*Math.cos(angle)-dir.z*Math.sin(angle)*playerSpeed;
-        player.position.z+=dir.x*Math.sin(angle)+dir.z*Math.cos(angle)*playerSpeed;
-        player.rotation.y=Math.atan2(dir.x,dir.z)+angle;
-    }
+  // キャラ移動
+  movePlayer(joyDir.x, joyDir.z);
+  velocity.y += GRAVITY;
+  player.position.x += velocity.x;
+  player.position.y += velocity.y;
+  player.position.z += velocity.z;
+  if(player.position.y<=10){ player.position.y=10; velocity.y=0; onGround=true; }
 
-    // 重力ジャンプ
-    player.position.y+=velocityY;
-    velocityY-=gravity;
-    if(player.position.y<=height/2){player.position.y=height/2; velocityY=0; onGround=true;}
+  // カメラ追従
+  controls.target.set(player.position.x, player.position.y+10, player.position.z);
+  controls.update();
 
-    // カメラ追従
-    const camOffset=new THREE.Vector3(0,50,80);
-    camera.position.lerp(new THREE.Vector3(player.position.x+camOffset.x,player.position.y+camOffset.y,player.position.z+camOffset.z),0.1);
-    controls.target.lerp(player.position,0.1);
-    controls.update();
-
-    updateTilesAroundCamera();
-    renderer.render(scene,camera);
+  for(const [,info] of loadedTiles){ info.group.traverse(obj=>{ if(obj instanceof THREE.LOD) obj.update(camera); }); }
+  updateTilesAroundCamera();
+  renderer.render(scene,camera);
 }
 animate();
 
-window.addEventListener('resize',()=>{renderer.setSize(window.innerWidth,window.innerHeight); camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();});
+/* ===================== Resize ===================== */
+window.addEventListener('resize',()=>{
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+/* keyboard radius */
+window.addEventListener('keydown', e=>{
+  if(e.key==='+'){ LOAD_RADIUS=Math.min(4,LOAD_RADIUS+1); document.getElementById('rad').textContent=LOAD_RADIUS; }
+  if(e.key==='-'){ LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1); document.getElementById('rad').textContent=LOAD_RADIUS; }
+});
+
 processQueue();
+console.log("OSM + 移動 + ジャンプ + ジョイスティック統合版スタート");
 </script>
 </body>
 </html>
