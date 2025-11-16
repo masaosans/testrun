@@ -123,7 +123,7 @@ function addFloorMeshToGroup(tex, bbox, group){
     const mercH = northMy - southMy;
 
     const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
-    const centerZ = ((northMy + southMy)/2 - ORIGIN_M.y); // 符号修正
+    const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
 
     const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(mercW, mercH),
@@ -131,10 +131,6 @@ function addFloorMeshToGroup(tex, bbox, group){
     );
     plane.rotation.x = -Math.PI/2;
     plane.position.set(centerX, 0, centerZ);
-
-    // UV反転で画像上下ずれ補正
-    plane.geometry.faceVertexUvs[0].forEach(uvs => uvs.forEach(uv => uv.y = 1 - uv.y));
-    plane.geometry.uvsNeedUpdate = true;
 
     group.add(plane);
 }
@@ -216,7 +212,7 @@ function addTileToScene(x,y,z,data){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
         new THREE.TextureLoader().load(tileUrl, tex=>{
-            tex.flipY = true; // ←上下反転
+            tex.flipY = false; // UV反転なし
             imgCache.set(tileUrl, tex);
             addFloorMeshToGroup(tex, data.bbox, group);
         });
