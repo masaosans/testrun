@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>OSM + キャラクター移動 + ジャンプ 統合版</title>
+<title>OSM 3D + キャラ移動 + ジャンプ統合版</title>
 <style>
 body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -24,6 +24,34 @@ button{padding:15px;margin:5px;font-size:16px;}
 <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
 
 <script>
+/* ===================== 基本設定 ===================== */
+const ZOOM = 16;
+let LOAD_RADIUS = 1;
+const MAX_CONCURRENT_FETCH = 3;
+const OVERPASS_RETRY = 2;
+const OVERPASS_DELAY_MS = 300;
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+const INIT_CENTER_LON = 139.6917;
+const INIT_CENTER_LAT = 35.6895;
+const R = 6378137;
+
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
+function lonToMercX(lon){ return R * deg2rad(lon); }
+function latToMercY(lat){ return R * Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/2)); }
+function mercXToLon(x){ return rad2deg(x / R); }
+function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
+function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
+
+function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
+function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2,z); return rad2deg(Math.atan(Math.sinh(n))); }
+
+function lonToTileX(lon,zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
+function latToTileY(lat,zoom){ const a = Math.log(Math.tan(deg2rad(lat)) + 1/Math.cos(deg2rad(lat))); return Math.floor((1 - a/Math.PI)/2*Math.pow(2,zoom)); }
+
+const ORIGIN_M = lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
+
 /* ===================== Three.js 初期化 ===================== */
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -33,7 +61,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 10, 20);
+camera.position.set(0, 20, 40);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -42,56 +70,214 @@ controls.enablePan = false;
 controls.maxPolarAngle = Math.PI/2.2;
 controls.minPolarAngle = Math.PI/6;
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const dir = new THREE.DirectionalLight(0xffffff,0.9);
 dir.position.set(500,1000,500);
 scene.add(dir);
 
-/* ===================== OSM 3Dマップ簡易床 ===================== */
-const floorGroup = new THREE.Group();
-scene.add(floorGroup);
-const plane = new THREE.Mesh(
-  new THREE.PlaneBufferGeometry(1000,1000),
-  new THREE.MeshPhongMaterial({color:0x99cc99})
-);
-plane.rotation.x = -Math.PI/2;
-floorGroup.add(plane);
+/* ===================== タイル管理 ===================== */
+const loadedTiles = new Map();
+const fetchQueue = [];
+let activeFetches = 0;
+const geoCache = new Map();
+const imgCache = new Map();
+const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
+
+function tileBBoxLonLat(x,y,z){
+  return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) };
+}
+function bboxToOverpassQuery(bbox){
+  return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`;
+}
+
+async function fetchOverpassForTile(x,y,z,tries=0){
+  const key = `${x}_${y}`;
+  if(geoCache.has(key)) return geoCache.get(key);
+  const bbox = tileBBoxLonLat(x,y,z);
+  const query = bboxToOverpassQuery(bbox);
+  try{
+    activeFetches++;
+    const res = await fetch(OVERPASS_URL, {method:"POST", body:query});
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const data = { bbox, json };
+    geoCache.set(key,data);
+    return data;
+  }catch(e){
+    if(tries < OVERPASS_RETRY){
+      await new Promise(r=>setTimeout(r,500*Math.pow(2,tries)));
+      return fetchOverpassForTile(x,y,z,tries+1);
+    } else return null;
+  }finally{ activeFetches--; }
+}
+
+function enqueueFetch(fn){ return new Promise(resolve=>{ fetchQueue.push({fn,resolve}); processQueue(); }); }
+function processQueue(){
+  if(activeFetches>=MAX_CONCURRENT_FETCH) return;
+  const job = fetchQueue.shift(); if(!job) return;
+  job.fn().then(r=>job.resolve(r)).finally(()=>setTimeout(processQueue, OVERPASS_DELAY_MS));
+}
+
+/* ===================== 床タイル ===================== */
+function addFloorMeshToGroup(tex, bbox, group){
+  const westMx = lonToMercX(bbox.west);
+  const eastMx = lonToMercX(bbox.east);
+  const northMy = latToMercY(bbox.north);
+  const southMy = latToMercY(bbox.south);
+  const mercW = eastMx - westMx;
+  const mercH = northMy - southMy;
+  const centerX = (westMx+eastMx)/2 - ORIGIN_M.x;
+  const centerZ = -((southMy+northMy)/2 - ORIGIN_M.y);
+
+  const plane = new THREE.Mesh(
+    new THREE.PlaneBufferGeometry(mercW, mercH),
+    new THREE.MeshPhongMaterial({map:tex})
+  );
+  plane.rotation.x = -Math.PI/2;
+  plane.position.set(centerX,0,centerZ);
+  group.add(plane);
+}
+
+/* ===================== 建物LOD ===================== */
+function mercToWorld(mx,my){ return { x: mx-ORIGIN_M.x, z: -(my-ORIGIN_M.y) }; }
+
+function createExtrudeMeshFromWay(el){
+  const shape = new THREE.Shape();
+  if(!el.geometry||el.geometry.length<2) return new THREE.Mesh(); // 防御
+  for(let i=0;i<el.geometry.length;i++){
+    const pt = el.geometry[i];
+    const m = lonLatToMerc(pt.lon,pt.lat);
+    const w = mercToWorld(m.x,m.y);
+    if(i===0) shape.moveTo(w.x,w.z);
+    else shape.lineTo(w.x,w.z);
+  }
+  let height=10;
+  const tags = el.tags||{};
+  if(tags.height) height=parseFloat(String(tags.height).replace('m',''))||height;
+  else if(tags["building:levels"]) height=(parseFloat(tags["building:levels"])||1)*3;
+
+  const geo = new THREE.ExtrudeBufferGeometry(shape,{depth:height,bevelEnabled:false});
+  geo.rotateX(-Math.PI/2);
+  geo.translate(0,-height/2,0);
+  const mat = new THREE.MeshPhongMaterial({map:windowTex,color:0xccccff});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.y = height/2;
+  return mesh;
+}
+
+function createBoxLODFromWay(el,height){
+  let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+  for(const pt of el.geometry){
+    const m = lonLatToMerc(pt.lon,pt.lat);
+    const w = mercToWorld(m.x,m.y);
+    if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
+    if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
+  }
+  const sx = Math.max(1,maxX-minX);
+  const sz = Math.max(1,maxZ-minZ);
+  const cx = (minX+maxX)/2;
+  const cz = (minZ+maxZ)/2;
+
+  const geo = new THREE.BoxBufferGeometry(sx,height,sz);
+  const mat = new THREE.MeshPhongMaterial({color:0x999999});
+  const box = new THREE.Mesh(geo,mat);
+  box.position.set(cx,height/2,cz);
+  return box;
+}
+
+function createBuildingLOD(el){
+  const tags = el.tags||{};
+  let height=10;
+  if(tags.height) height=parseFloat(String(tags.height).replace('m',''))||height;
+  else if(tags["building:levels"]) height=(parseFloat(tags["building:levels"])||1)*3;
+  const lod = new THREE.LOD();
+  try{ lod.addLevel(createExtrudeMeshFromWay(el),0); }catch(e){ console.warn("detail fail",e);}
+  lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),200);
+  lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),800);
+  return lod;
+}
+
+/* ===================== タイル追加 ===================== */
+function addTileToScene(x,y,z,data){
+  const key=`${x}_${y}`;
+  if(loadedTiles.has(key)) return;
+  const group = new THREE.Group();
+  group.userData={x,y,z,bbox:data.bbox};
+
+  const tileUrl=`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  if(imgCache.has(tileUrl)) addFloorMeshToGroup(imgCache.get(tileUrl),data.bbox,group);
+  else new THREE.TextureLoader().load(tileUrl,tex=>{ tex.flipY=false; imgCache.set(tileUrl,tex); addFloorMeshToGroup(tex,data.bbox,group); });
+
+  const els = data.json.elements||[];
+  for(const el of els){ if(el.type==="way" && el.geometry) try{ group.add(createBuildingLOD(el)); }catch(e){console.warn("building fail",e);} }
+
+  scene.add(group);
+  loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
+}
+
+/* ===================== タイル更新 ===================== */
+function unloadFarTiles(cx,cy){
+  for(const [key,info] of Array.from(loadedTiles)){
+    const [tx,ty] = key.split("_").map(n=>parseInt(n,10));
+    if(Math.abs(tx-cx)>LOAD_RADIUS+1 || Math.abs(ty-cy)>LOAD_RADIUS+1){
+      const grp = info.group;
+      scene.remove(grp);
+      grp.traverse(obj=>{ if(obj.geometry)obj.geometry.dispose(); if(obj.material)Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose(); });
+      loadedTiles.delete(key);
+    }
+  }
+}
+
+function cameraToLonLat(){
+  const tx=controls.target.x;
+  const tz=controls.target.z;
+  const m={x:tx+ORIGIN_M.x,y:-tz+ORIGIN_M.y};
+  return {lon:mercXToLon(m.x),lat:mercYToLat(m.y)};
+}
+
+let lastUpdate=0;
+async function updateTilesAroundCamera(){
+  const now = performance.now();
+  if(now-lastUpdate<1200) return;
+  lastUpdate=now;
+  const center=cameraToLonLat();
+  const cx=lonToTileX(center.lon,ZOOM);
+  const cy=latToTileY(center.lat,ZOOM);
+
+  unloadFarTiles(cx,cy);
+
+  for(let dx=-LOAD_RADIUS;dx<=LOAD_RADIUS;dx++){
+    for(let dy=-LOAD_RADIUS;dy<=LOAD_RADIUS;dy++){
+      const tx=cx+dx, ty=cy+dy;
+      const key=`${tx}_${ty}`;
+      if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
+      enqueueFetch(async()=>{ const res = await fetchOverpassForTile(tx,ty,ZOOM); if(res) addTileToScene(tx,ty,ZOOM,res); return res; });
+    }
+  }
+}
 
 /* ===================== キャラクター ===================== */
-const charHeight = 2;
-const charRadius = 0.5;
-const character = new THREE.Mesh(
+const charHeight=2;
+const charRadius=0.5;
+const character=new THREE.Mesh(
   new THREE.CylinderBufferGeometry(charRadius,charRadius,charHeight,16),
   new THREE.MeshPhongMaterial({color:0xff3333})
 );
-character.position.y = charHeight/2;
+character.position.y=charHeight/2;
 scene.add(character);
 
 /* ===================== ジョイスティック ===================== */
-const joystick = nipplejs.create({
-  zone: document.getElementById('joystick'),
-  mode:'static',
-  position: { left: '50px', bottom:'50px' },
-  color:'gray'
-});
-
-let moveVector = new THREE.Vector3();
-joystick.on('move', function(evt, data){
-  const rad = data.angle.radian;
-  const force = data.force;
-  moveVector.set(Math.sin(rad)*force,0,Math.cos(rad)*force);
-});
-joystick.on('end', ()=> moveVector.set(0,0,0));
+const joystick = nipplejs.create({ zone:document.getElementById('joystick'), mode:'static', position:{left:'50px',bottom:'50px'}, color:'gray' });
+let moveVector=new THREE.Vector3();
+joystick.on('move',(evt,data)=>{ const rad=data.angle.radian; const force=data.force; moveVector.set(Math.sin(rad)*force,0,Math.cos(rad)*force); });
+joystick.on('end',()=> moveVector.set(0,0,0));
 
 /* ===================== 移動 & ジャンプ ===================== */
-let velocityY = 0;
-const gravity = -0.5;
-const jumpForce = 0.25;
-let onGround = true;
-
-document.getElementById('jumpBtn').addEventListener('click',()=>{
-  if(onGround){ velocityY = jumpForce; onGround=false; }
-});
+let velocityY=0;
+const gravity=-0.5;
+const jumpForce=0.25;
+let onGround=true;
+document.getElementById('jumpBtn').addEventListener('click',()=>{ if(onGround){velocityY=jumpForce;onGround=false;} });
 
 /* ===================== アニメーション ===================== */
 function animate(){
@@ -99,36 +285,24 @@ function animate(){
 
   // キャラクター移動
   if(moveVector.length()>0){
-    // カメラ方向を基準に
-    const camDir = new THREE.Vector3();
+    const camDir=new THREE.Vector3();
     camera.getWorldDirection(camDir);
-    camDir.y = 0;
-    camDir.normalize();
+    camDir.y=0; camDir.normalize();
+    const camRight=new THREE.Vector3(); camRight.crossVectors(new THREE.Vector3(0,1,0),camDir).normalize();
 
-    const camRight = new THREE.Vector3();
-    camRight.crossVectors(new THREE.Vector3(0,1,0), camDir).normalize();
-
-    const move = new THREE.Vector3();
-    move.addScaledVector(camDir, -moveVector.z);
-    move.addScaledVector(camRight, moveVector.x);
+    const move=new THREE.Vector3();
+    move.addScaledVector(camDir,-moveVector.z);
+    move.addScaledVector(camRight,moveVector.x);
     move.multiplyScalar(0.3);
 
     character.position.add(move);
-
-    // キャラクター向き
-    if(move.length()>0.001){
-      character.rotation.y = Math.atan2(move.x, move.z);
-    }
+    if(move.length()>0.001) character.rotation.y=Math.atan2(move.x,move.z);
   }
 
   // ジャンプ・重力
   velocityY += gravity*0.02;
   character.position.y += velocityY;
-  if(character.position.y <= charHeight/2){
-    character.position.y = charHeight/2;
-    velocityY = 0;
-    onGround = true;
-  }
+  if(character.position.y <= charHeight/2){ character.position.y=charHeight/2; velocityY=0; onGround=true; }
 
   // カメラ追従
   const camTarget = new THREE.Vector3();
@@ -136,16 +310,22 @@ function animate(){
   controls.target.lerp(camTarget,0.2);
   controls.update();
 
+  // タイル更新
+  updateTilesAroundCamera();
+
   renderer.render(scene,camera);
 }
 animate();
 
 /* ===================== Resize ===================== */
 window.addEventListener('resize',()=>{
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth/window.innerHeight;
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  camera.aspect=window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
 });
+
+processQueue();
+console.log("OSM 3D + キャラ移動 + ジャンプ 統合版 起動済み");
 </script>
 </body>
 </html>
