@@ -51,8 +51,13 @@ function lonToTileX(lon, zoom){ return Math.floor((lon + 180) / 360 * Math.pow(2
 function latToTileY(lat, zoom){ const a = Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180)); return Math.floor((1 - a/Math.PI)/2 * Math.pow(2,zoom)); }
 
 /* ORIGIN (東京) */
-const INIT_CENTER_LON = 139.6917;
-const INIT_CENTER_LAT = 35.6895;
+//const INIT_CENTER_LON = 139.6917;
+//const INIT_CENTER_LAT = 35.6895;
+
+//35.468 133.0483 島根松江
+
+const INIT_CENTER_LON = 133.0483;
+const INIT_CENTER_LAT = 35.468;
 const ORIGIN_M = lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
 
 /* ===================== Three.js 初期化 ===================== */
