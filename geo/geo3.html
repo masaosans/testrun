@@ -194,8 +194,8 @@ function createBuildingLOD(el){
 
     const lod = new THREE.LOD();
     try{ lod.addLevel(createExtrudeMeshFromWay(el),0); } catch(e){ console.warn("detail fail",e); }
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),200);
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),800);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),500);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),1000);
     return lod;
 }
 
