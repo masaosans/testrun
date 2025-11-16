@@ -28,7 +28,7 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 <script>
 /* ===================== 設定 / ユーティリティ ===================== */
 const ZOOM = 16;
-let LOAD_RADIUS = 1;
+let LOAD_RADIUS = 2;//tileの半径
 document.getElementById('rad').textContent = LOAD_RADIUS;
 
 const MAX_CONCURRENT_FETCH = 3;
@@ -71,8 +71,8 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = true; // allow panning as well
-controls.minDistance = 10;
-controls.maxDistance = 2000;
+controls.minDistance = 5;//描画範囲Min　10→
+controls.maxDistance = 1000;//描画範囲Max　2000→
 controls.minPolarAngle = Math.PI * 0.20; // 上限 (tilt up)
 controls.maxPolarAngle = Math.PI * 0.8;  // 下限 (tilt down)
 
