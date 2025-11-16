@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Three.js TPS + Joystick + Jump</title>
+<style>
+html,body { margin:0; padding:0; height:100%; overflow:hidden; background:#20232a; }
+#container { width:100%; height:100%; }
+
+/* joystick areas */
+.joystick-area {
+  position:absolute;
+  bottom:20px;
+  width:160px;
+  height:160px;
+  touch-action:none;
+}
+#leftJoy { left:20px; }
+#rightJoy { right:20px; }
+
+.joy-base, .joy-stick {
+  position:absolute;
+  background:rgba(255,255,255,0.12);
+  border-radius:50%;
+  pointer-events:none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5) inset;
+}
+.joy-base { width:160px; height:160px; }
+.joy-stick { width:80px; height:80px; top:40px; left:40px; }
+
+#jumpBtn {
+  position: absolute;
+  right: 22px;
+  bottom: 210px;
+  width:72px;
+  height:72px;
+  border-radius:50%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font-weight:700;
+  -webkit-user-select:none;
+  user-select:none;
+  touch-action: manipulation;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.4);
+}
+#jumpBtn:active { transform: translateY(2px); }
+
+#info {
+  position:absolute;
+  top:10px; left:10px; padding:8px 12px;
+  background:rgba(0,0,0,0.4); color:#fff; font-family:sans-serif; border-radius:8px;
+}
+
+/* small HUD showing grounded */
+#hud {
+  position:absolute;
+  top:10px; right:10px; padding:8px 12px;
+  background:rgba(0,0,0,0.35); color:#fff; font-family:sans-serif; border-radius:8px;
+}
+</style>
+</head>
+<body>
+<div id="container"></div>
+
+<!-- Joysticks -->
+<div id="leftJoy" class="joystick-area">
+  <div class="joy-base"></div>
+  <div class="joy-stick" id="leftStick"></div>
+</div>
+<div id="rightJoy" class="joystick-area">
+  <div class="joy-base"></div>
+  <div class="joy-stick" id="rightStick"></div>
+</div>
+
+<!-- Jump button -->
+<div id="jumpBtn">JUMP</div>
+
+<div id="info">WASD:移動 / Shift:走る / Mouse or RightDrag:カメラ / Space:ジャンプ</div>
+<div id="hud">Grounded: <span id="groundedState">—</span></div>
+
+<script type="module">
+/* ---------------------------
+   Three.js imports
+----------------------------*/
+import * as THREE from "https://unpkg.com/three@0.128.0/build/three.module.js";
+import { GLTFLoader } from "https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "https://unpkg.com/three@0.128.0/examples/jsm/controls/OrbitControls.js";
+
+/* ---------------------------
+   Scene setup
+----------------------------*/
+const container = document.getElementById("container");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 2000);
+camera.position.set(0, 3, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
+
+/* Lights */
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+hemi.position.set(0,50,0);
+scene.add(hemi);
+
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(5,10,7);
+dir.castShadow = true;
+dir.shadow.camera.left = -10; dir.shadow.camera.right = 10;
+dir.shadow.camera.top = 10; dir.shadow.camera.bottom = -10;
+scene.add(dir);
+
+/* Ground */
+const groundMat = new THREE.MeshStandardMaterial({ color:0x556b2f });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(200,200), groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* Some boxes as obstacles / platforms */
+const collidables = []; // objects considered for ground collision
+for(let i=0;i<10;i++){
+  const h = 0.6 + Math.random()*2.0;
+  const box = new THREE.Mesh(
+    new THREE.BoxGeometry(1, h, 1),
+    new THREE.MeshStandardMaterial({ color: 0x8b8b8b })
+  );
+  box.position.set((Math.random()-0.5)*20, h/2, (Math.random()-0.5)*20);
+  box.castShadow = true;
+  box.receiveShadow = true;
+  scene.add(box);
+  collidables.push(box);
+}
+collidables.push(ground);
+
+/* ---------------------------
+   Player setup
+   We treat `player` as the physics/controller origin (feet originate here).
+   The visible model is offset so that its feet sit near the origin.
+----------------------------*/
+const player = new THREE.Group();
+player.position.set(0, 0, 0); // y will be changed by physics
+scene.add(player);
+
+let mixer = null;
+const loader = new GLTFLoader();
+// free sample model from threejs examples
+const modelURL = "https://threejs.org/examples/models/gltf/RobotExpressive/RobotExpressive.glb";
+loader.load(modelURL, gltf => {
+  const model = gltf.scene;
+  model.traverse(o => { if(o.isMesh) o.castShadow = true; });
+  // offset model so its feet align near player origin (model-specific tweak)
+  model.position.y = -1.2;
+  model.scale.setScalar(1.0);
+  player.add(model);
+
+  mixer = new THREE.AnimationMixer(model);
+  const clips = gltf.animations || [];
+  // find animations if exist
+  const idle = THREE.AnimationClip.findByName(clips, "Idle") || clips[0] || null;
+  const walk = THREE.AnimationClip.findByName(clips, "Walking") || null;
+  const run  = THREE.AnimationClip.findByName(clips, "Running") || null;
+  const jumpClip = THREE.AnimationClip.findByName(clips, "Jump") || THREE.AnimationClip.findByName(clips, "Jumping") || null;
+  const fallClip = THREE.AnimationClip.findByName(clips, "Falling") || null;
+
+  let idleA, walkA, runA, jumpA, fallA;
+  if(idle) { idleA = mixer.clipAction(idle); idleA.play(); }
+  if(walk) walkA = mixer.clipAction(walk);
+  if(run)  runA  = mixer.clipAction(run);
+  if(jumpClip) jumpA = mixer.clipAction(jumpClip);
+  if(fallClip) fallA = mixer.clipAction(fallClip);
+
+  player.userData.anim = { idleA, walkA, runA, jumpA, fallA, current: idleA || null };
+}, undefined, err => console.error(err));
+
+/* ---------------------------
+   Controls
+----------------------------*/
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enablePan = false;
+controls.enableDamping = true;
+controls.target.copy(player.position);
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.minDistance = 2;
+controls.maxDistance = 12;
+
+/* ---------------------------
+   Input (keyboard & joysticks)
+----------------------------*/
+const keyMap = {};
+window.addEventListener("keydown", e => {
+  if(e.key==="w"||e.key==="ArrowUp") keyMap["forward"]=1;
+  if(e.key==="s"||e.key==="ArrowDown") keyMap["back"]=1;
+  if(e.key==="a"||e.key==="ArrowLeft") keyMap["left"]=1;
+  if(e.key==="d"||e.key==="ArrowRight") keyMap["right"]=1;
+  if(e.key==="Shift") keyMap["shift"]=1;
+  if(e.code==="Space") tryJump();
+});
+window.addEventListener("keyup", e => {
+  if(e.key==="w"||e.key==="ArrowUp") keyMap["forward"]=0;
+  if(e.key==="s"||e.key==="ArrowDown") keyMap["back"]=0;
+  if(e.key==="a"||e.key==="ArrowLeft") keyMap["left"]=0;
+  if(e.key==="d"||e.key==="ArrowRight") keyMap["right"]=0;
+  if(e.key==="Shift") keyMap["shift"]=0;
+});
+
+/* Joysticks - same implementation as before */
+function createJoystick(areaId, stickId){
+  const area = document.getElementById(areaId);
+  const stick = document.getElementById(stickId);
+
+  let active = false;
+  let origin = { x:0, y:0 };
+  let value = { x:0, y:0 };
+
+  area.addEventListener("touchstart", e=>{
+    active = true;
+    const t = e.touches[0];
+    const rect = area.getBoundingClientRect();
+    origin.x = t.clientX - rect.left;
+    origin.y = t.clientY - rect.top;
+  }, { passive:false });
+
+  area.addEventListener("touchmove", e=>{
+    if(!active) return;
+    const t = e.touches[0];
+    const rect = area.getBoundingClientRect();
+    const dx = t.clientX - rect.left - origin.x;
+    const dy = t.clientY - rect.top - origin.y;
+    const max = 60;
+    const dist = Math.hypot(dx,dy);
+    const r = dist > max ? max/dist : 1;
+    const sx = dx * r;
+    const sy = dy * r;
+    stick.style.transform = `translate(${sx}px, ${sy}px)`;
+    value.x = sx / max;
+    value.y = sy / max;
+  }, { passive:false });
+
+  area.addEventListener("touchend", ()=>{
+    active = false;
+    stick.style.transform = `translate(0px,0px)`;
+    value.x = 0; value.y = 0;
+  });
+  return value;
+}
+
+const leftJoy = createJoystick("leftJoy", "leftStick");
+const rightJoy = createJoystick("rightJoy", "rightStick");
+
+/* Jump button (touch + click) */
+const jumpBtn = document.getElementById("jumpBtn");
+let jumpRequested = false;
+jumpBtn.addEventListener("touchstart", e=>{ e.preventDefault(); tryJump(); }, { passive:false });
+jumpBtn.addEventListener("mousedown", e=>{ tryJump(); });
+
+/* ---------------------------
+   Physics params
+----------------------------*/
+const gravity = -30.0; // m/s^2
+const jumpVelocity = 8.5; // initial jump impulse
+let verticalVelocity = 0.0; // vy in m/s
+let isGrounded = false;
+const raycaster = new THREE.Raycaster();
+const footToModelOffset = 1.2; // same as model.position.y absolute value
+const groundCheckDistance = 1.6; // how far below to check for ground
+
+// HUD
+const groundedStateEl = document.getElementById("groundedState");
+
+/* ---------------------------
+   Movement & animation helpers
+----------------------------*/
+let velocity = new THREE.Vector3();
+const walkSpeed = 2.0;
+const runSpeed = 5.0;
+const accel = 20.0;
+const clock = new THREE.Clock();
+
+function getInputVector(){
+  let iX = 0, iZ = 0;
+  if(keyMap["forward"]) iZ -= 1;
+  if(keyMap["back"])    iZ += 1;
+  if(keyMap["left"])    iX -= 1;
+  if(keyMap["right"])   iX += 1;
+
+  // joystick left overrides keyboard if used
+  if(Math.abs(leftJoy.x) > 0.05 || Math.abs(leftJoy.y) > 0.05){
+    iX = leftJoy.x;
+    iZ = leftJoy.y * -1; // joystick y: up is negative on screen, so invert to get forward negative
+  }
+
+  const len = Math.hypot(iX, iZ);
+  if(len === 0) return new THREE.Vector3(0,0,0);
+  return new THREE.Vector3(iX/len, 0, iZ/len);
+}
+
+function applyCameraPanFromRightJoy(){
+  if(Math.abs(rightJoy.x)>0.05 || Math.abs(rightJoy.y)>0.05){
+    controls.rotateLeft(-rightJoy.x*0.05);
+    controls.rotateUp(-rightJoy.y*0.05);
+  }
+}
+
+// animation blending helper - tries to play a clip if present
+function crossfadeTo(action, fade=0.18){
+  if(!player.userData.anim) return;
+  const anim = player.userData.anim;
+  const current = anim.current;
+  if(!action || action === current) return;
+  if(current) current.fadeOut(fade);
+  action.reset().fadeIn(fade).play();
+  anim.current = action;
+}
+
+function updateAnimationBasedOnState(speed){
+  if(!player.userData.anim) return;
+  const anim = player.userData.anim;
+  // prioritize jump/fall if present
+  if(!isGrounded){
+    if(anim.jumpA && verticalVelocity > 0.1){ crossfadeTo(anim.jumpA, 0.1); return; }
+    if(anim.fallA && verticalVelocity <= 0.1){ crossfadeTo(anim.fallA, 0.15); return; }
+    // otherwise keep whatever was playing
+    return;
+  }
+  // grounded: speed decides idle/walk/run
+  let next = anim.idleA || null;
+  if(speed > 3.0 && anim.runA) next = anim.runA;
+  else if(speed > 0.1 && anim.walkA) next = anim.walkA;
+  if(next) crossfadeTo(next, 0.18);
+}
+
+/* ---------------------------
+   Jump request handler
+----------------------------*/
+function tryJump(){
+  // small conditions: only allow jump if grounded (simple)
+  if(isGrounded){
+    verticalVelocity = jumpVelocity;
+    isGrounded = false;
+    // play jump anim immediately if available
+    if(player.userData.anim && player.userData.anim.jumpA){
+      crossfadeTo(player.userData.anim.jumpA, 0.08);
+    }
+  }
+}
+
+/* ---------------------------
+   Ground detection using raycast
+   We cast from slightly above player's origin downward and read first intersection.
+----------------------------*/
+function checkGround(){
+  // cast from player position + small upward offset
+  const origin = new THREE.Vector3(player.position.x, player.position.y + 0.5, player.position.z);
+  raycaster.set(origin, new THREE.Vector3(0,-1,0));
+  const intersects = raycaster.intersectObjects(collidables, false);
+  if(intersects.length > 0){
+    const hit = intersects[0];
+    const dist = hit.distance;
+    // if distance less than threshold we are grounded
+    if(dist <= groundCheckDistance){
+      const groundY = origin.y - dist;
+      return { grounded:true, groundY: groundY, hitObject: hit.object, distance: dist };
+    }
+  }
+  return { grounded:false, groundY: null, hitObject:null, distance: null };
+}
+
+/* ---------------------------
+   Main loop
+----------------------------*/
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+
+  // --- horizontal input / velocity
+  const input = getInputVector();
+  const inputLen = input.length();
+  const targetSpeed = (keyMap["shift"] ? runSpeed : walkSpeed) * inputLen;
+  const targetVel = input.clone().multiplyScalar(targetSpeed);
+  velocity.lerp(targetVel, 1 - Math.exp(-accel * dt));
+
+  // --- physics vertical
+  // integrate gravity
+  verticalVelocity += gravity * dt;
+  player.position.y += verticalVelocity * dt;
+
+  // check ground after moving
+  const groundInfo = checkGround();
+  if(groundInfo.grounded){
+    // snap to ground with small tolerance
+    const desiredY = groundInfo.groundY;
+    const footOffset = 0.0; // player's origin is feet-level
+    if(player.position.y < desiredY + footOffset + 0.05){
+      // landed or stood on ground
+      player.position.y = desiredY + footOffset;
+      verticalVelocity = 0;
+      isGrounded = true;
+    } else {
+      // still above ground
+      isGrounded = false;
+    }
+  } else {
+    isGrounded = false;
+  }
+
+  // update HUD
+  groundedStateEl.textContent = isGrounded ? "Yes" : "No";
+
+  // apply horizontal movement in world-space relative to camera yaw
+  // We want movement relative to camera direction: compute yaw from camera around player
+  // yaw angle: use vector from player to camera projected on XZ
+  const camDir = new THREE.Vector3().subVectors(camera.position, player.position);
+  const yaw = Math.atan2(camDir.x, camDir.z);
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const worldVX = velocity.x * cos - velocity.z * sin;
+  const worldVZ = velocity.x * sin + velocity.z * cos;
+  player.position.x += worldVX * dt;
+  player.position.z += worldVZ * dt;
+
+  // rotate model to face movement direction when moving on ground (only horizontal)
+  const horizVel = new THREE.Vector3(worldVX, 0, worldVZ);
+  if(horizVel.lengthSq() > 0.0001){
+    const angle = Math.atan2(horizVel.x, horizVel.z);
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), angle);
+    player.quaternion.slerp(q, Math.min(1, 10 * dt));
+  }
+
+  // camera control from right joystick
+  if(Math.abs(rightJoy.x) > 0.05 || Math.abs(rightJoy.y) > 0.05) applyCameraPanFromRightJoy();
+  controls.target.copy(player.position);
+  controls.update();
+
+  // animation update
+  if(mixer) mixer.update(dt);
+  updateAnimationBasedOnState(velocity.length());
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+/* ---------------------------
+   Resize handling
+----------------------------*/
+window.addEventListener("resize", ()=>{
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+</script>
+</body>
+</html>
