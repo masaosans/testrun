@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>3D Map Game with Joystick</title>
+<title>3D Map Game with Joystick (v0.145)</title>
 <style>
 body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 #info{
@@ -36,8 +36,8 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 <div id="info">ドラッグで視点操作 / 左下で移動</div>
 <div id="joystick"><div id="stick"></div></div>
 
-<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.145.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
 <script>
 /* ===================== Three.js 初期化 ===================== */
 const scene = new THREE.Scene();
@@ -113,16 +113,13 @@ joystick.addEventListener('touchend', e=>{
 const speed = 4;
 function updatePlayer(){
   if(joystickDir.length()>0.1){
-    // カメラ後方視点: カメラのY回転を反映
     const camYaw = Math.atan2(camera.position.x-player.position.x, camera.position.z-player.position.z);
     const cosR = Math.cos(camYaw), sinR = Math.sin(camYaw);
     const moveX = joystickDir.x*cosR - joystickDir.z*sinR;
     const moveZ = joystickDir.x*sinR + joystickDir.z*cosR;
     player.position.x += moveX*speed;
     player.position.z += moveZ*speed;
-    // プレイヤーの向き
     player.rotation.y = Math.atan2(moveX, moveZ);
-    // カメラ追従
     camera.position.x = player.position.x - 300*Math.sin(player.rotation.y);
     camera.position.z = player.position.z - 300*Math.cos(player.rotation.y);
     camera.position.y = player.position.y + 150;
