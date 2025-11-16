@@ -1,8 +1,8 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Click Label Complete)</title>
+<title>OSM 3D Viewer (Click Name)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -34,6 +34,7 @@ function latToMercY(lat){ return R * Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/
 function mercXToLon(x){ return rad2deg(x / R); }
 function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
 function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
+
 function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
 function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2,z); return Math.atan(Math.sinh(n)) * 180 / Math.PI; }
 function lonToTileX(lon, zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
@@ -149,27 +150,23 @@ function createExtrudeMeshFromWay(el){
 function addTileToScene(x,y,z,data){
     const key = `${x}_${y}`;
     if(loadedTiles.has(key)) return;
-
     const group = new THREE.Group();
     group.userData={x,y,z,bbox:data.bbox};
-
     const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
     if(imgCache.has(tileUrl)){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
         new THREE.TextureLoader().load(tileUrl, tex=>{
-            tex.flipY=true; // OSMタイル調整
+            tex.flipY = true;
             imgCache.set(tileUrl, tex);
             addFloorMeshToGroup(tex, data.bbox, group);
         });
     }
-
     const els = data.json.elements||[];
     for(const el of els){
         if(el.type!=="way"||!el.geometry) continue;
         try{ group.add(createExtrudeMeshFromWay(el)); } catch(e){ console.warn("building create err",e); }
     }
-
     scene.add(group);
     loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
 }
@@ -205,13 +202,10 @@ async function updateTilesAroundCamera(){
     const now = performance.now();
     if(now - lastUpdate < MIN_UPDATE_INTERVAL) return;
     lastUpdate = now;
-
     const center = cameraToLonLat();
     const cx = lonToTileX(center.lon, ZOOM);
     const cy = latToTileY(center.lat, ZOOM);
-
     unloadFarTiles(cx, cy);
-
     for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
         for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
             const tx=cx+dx, ty=cy+dy;
@@ -226,7 +220,7 @@ async function updateTilesAroundCamera(){
     }
 }
 
-/* ===================== ラベル関連 ===================== */
+/* ===================== クリック建物名表示 ===================== */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let currentLabel = null;
@@ -250,15 +244,15 @@ function addLabel(name, pos){
 
 function onPointer(event){
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((event.clientX-rect.left)/rect.width)*2-1;
-    mouse.y = -((event.clientY-rect.top)/rect.height)*2+1;
+    mouse.x = ((event.clientX - rect.left)/rect.width)*2-1;
+    mouse.y = -((event.clientY - rect.top)/rect.height)*2+1;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
     for(const i of intersects){
         if(i.object.userData && i.object.userData.name){
             const pos = i.object.position.clone(); 
-            const geo = i.object.geometry.boundingBox;
-            pos.y += geo ? geo.max.y * 1.2 : 50;
+            const geo = i.object.geometry && i.object.geometry.boundingBox;
+            pos.y += geo ? geo.max.y * 1.5 : 50;
             addLabel(i.object.userData.name, pos);
             break;
         }
@@ -271,7 +265,6 @@ renderer.domElement.addEventListener('touchstart', e=>{ e.preventDefault(); onPo
 function animate(){
     requestAnimationFrame(animate);
     controls.update();
-    for(const [,info] of loadedTiles){ info.group.traverse(obj=>{ if(obj instanceof THREE.LOD) obj.update(camera); }); }
     updateTilesAroundCamera();
     renderer.render(scene,camera);
 }
@@ -284,6 +277,13 @@ window.addEventListener('resize', ()=>{
     camera.updateProjectionMatrix();
 });
 
+/* keyboard radius */
+window.addEventListener('keydown', e=>{
+    if(e.key==="+"){ LOAD_RADIUS=Math.min(4,LOAD_RADIUS+1); }
+    if(e.key==="-"){ LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1); }
+});
+
+processQueue();
 </script>
 </body>
 </html>
