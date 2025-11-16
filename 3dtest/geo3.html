@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>東京全域 3D 建物（タイルロード）</title>
+<style>
+  body { margin:0; overflow:hidden; }
+</style>
+</head>
+<body>
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+
+// ==========================
+// Three.js 初期化
+// ==========================
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa0c4ff);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 10000);
+camera.position.set(0,500,800);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0,0,0);
+
+// Light
+scene.add(new THREE.AmbientLight(0xffffff,0.5));
+const sun = new THREE.DirectionalLight(0xffffff,0.8);
+sun.position.set(300,600,300);
+scene.add(sun);
+
+// ==========================
+// タイル設定
+// ==========================
+const zoom = 16;
+
+// 東京全域のタイル範囲（例）
+const x_min = 58250, x_max = 58270;
+const y_min = 25790, y_max = 25810;
+
+const tileSize = 500; // PlaneGeometry のサイズ（メートル換算）
+
+// タイル座標 → 世界座標変換
+function lon2x(lon, tileLon){ return (lon-tileLon)*tileSize*100; }
+function lat2z(lat, tileLat){ return -(lat-tileLat)*tileSize*100; }
+
+// ==========================
+// 建物生成関数
+// ==========================
+function addBuildingsFromGeoJSON(tileGeoJSON, tileX, tileY){
+  const texLoader = new THREE.TextureLoader();
+  const windowTex = texLoader.load('https://i.imgur.com/4NJx7G9.png');
+
+  tileGeoJSON.features.forEach(f=>{
+    if(!f.geometry || f.geometry.type!=="Polygon") return;
+
+    const coords = f.geometry.coordinates[0];
+    const shape = new THREE.Shape();
+    coords.forEach((pt,i)=>{
+      // 緯度経度をタイル左上基準で 3D 座標化
+      const x = lon2x(pt[0], tileX*0.0001 + 139.699);
+      const z = lat2z(pt[1], tileY*0.0001 + 35.659);
+      if(i===0) shape.moveTo(x,z);
+      else shape.lineTo(x,z);
+    });
+
+    let height = f.properties.height ? parseFloat(f.properties.height) :
+                 (f.properties["building:levels"] ? f.properties["building:levels"]*3 : 10);
+    let color=0x88aaff;
+    if(height>60) color=0xffaa88;
+    else if(height>40) color=0xaaff88;
+
+    const geo = new THREE.ExtrudeGeometry(shape,{depth:height,bevelEnabled:false});
+    const mat = new THREE.MeshPhongMaterial({map:windowTex,color:color});
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x=-Math.PI/2;
+    mesh.position.y=height/2;
+    scene.add(mesh);
+  });
+}
+
+// ==========================
+// 床面タイル生成
+// ==========================
+function addFloorTile(tileX, tileY){
+  const url = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
+  const texLoader = new THREE.TextureLoader();
+  texLoader.load(url, tex=>{
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(tileSize,tileSize),
+      new THREE.MeshPhongMaterial({map:tex})
+    );
+    plane.rotation.x=-Math.PI/2;
+    // タイル原点を世界座標に変換
+    plane.position.x = (tileX-x_min)*tileSize;
+    plane.position.z = (tileY-y_min)*tileSize;
+    scene.add(plane);
+  });
+}
+
+// ==========================
+// タイル順次ロード
+// ==========================
+for(let x=x_min;x<=x_max;x++){
+  for(let y=y_min;y<=y_max;y++){
+    // まず床面
+    addFloorTile(x,y);
+    // 次に建物
+    // ローカルに保存済み GeoJSON ファイルを fetch
+    const geojsonUrl = `tiles_geojson/tile_${zoom}_${x}_${y}.geojson`;
+    fetch(geojsonUrl)
+      .then(r=>r.json())
+      .then(data=>{
+        if(data.features) addBuildingsFromGeoJSON(data,x,y);
+      })
+      .catch(e=>console.log("GeoJSON fetch error:",geojsonUrl,e));
+  }
+}
+
+// ==========================
+// Render loop
+// ==========================
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
+});
+</script>
+</body>
+</html>
+

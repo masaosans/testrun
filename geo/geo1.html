@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>OSM 3D Tokyo (Dynamic Overpass Tiles)</title>
+<style>
+  body { margin:0; overflow:hidden; }
+</style>
+</head>
+<body>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+/* ============================================
+   設定
+============================================ */
+const ZOOM = 16;
+const TILE_SIZE_M = 200;
+
+// Overpass API（GETでタイル単位）
+function buildOverpassURL(bbox){
+  return "https://overpass-api.de/api/interpreter?data=" +
+    `[out:json][timeout:25];
+     (
+       way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
+     );
+     (._;>;);
+     out geom;`;
+}
+
+// カメラが見ている中心から何タイル読み込む？
+const LOAD_RADIUS = 2;
+
+/* ============================================
+   Three.js 初期化
+============================================ */
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa0c8ff);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
+camera.position.set(0,800,1200);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0,0,0);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const sun = new THREE.DirectionalLight(0xffffff,0.8);
+sun.position.set(500,1000,500);
+scene.add(sun);
+
+/* ============================================
+   タイル座標系（緯度経度→タイル）
+============================================ */
+function lon2tile(lon, zoom){
+  return Math.floor((lon + 180) / 360 * (2 ** zoom));
+}
+function lat2tile(lat, zoom){
+  return Math.floor(
+    (1 - Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180)) / Math.PI) / 2 * (2**zoom)
+  );
+}
+function tile2lon(x,z){
+  return x / (2**z) * 360 - 180;
+}
+function tile2lat(y,z){
+  const n = Math.PI - 2*Math.PI*y/(2**z);
+  return (180 / Math.PI * Math.atan(Math.sinh(n)));
+}
+function tileBBox(x,y,z){
+  return {
+    west:  tile2lon(x, z),
+    east:  tile2lon(x+1, z),
+    north: tile2lat(y, z),
+    south: tile2lat(y+1, z)
+  };
+}
+
+/* ============================================
+   管理用
+============================================ */
+const loadedTiles = new Map();   // "x_y" → {meshGroup}
+const textureCache = {};
+const geoCache = {};             // URL→geojson
+
+const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
+
+/* ============================================
+   タイルの読み込み
+============================================ */
+async function loadTile(x, y){
+  const key = `${x}_${y}`;
+  if(loadedTiles.has(key)) return;
+
+  // タイルの bbox 計算
+  const bbox = tileBBox(x,y,ZOOM);
+  const url = buildOverpassURL(bbox);
+
+  let geojson;
+  try {
+    if(geoCache[url]) geojson = geoCache[url];
+    else {
+      const r = await fetch(url);
+      geojson = await r.json();
+      geoCache[url] = geojson;
+    }
+  } catch(e){
+    console.log("Fetch error", url, e);
+    return;
+  }
+
+  // タイルのメッシュグループ
+  const group = new THREE.Group();
+  loadedTiles.set(key, group);
+  scene.add(group);
+
+  // タイル全体位置（左上）
+  const baseX = x * TILE_SIZE_M;
+  const baseZ = y * TILE_SIZE_M;
+
+  /* ---- 床タイル ---- */
+  const imgUrl = `https://tile.openstreetmap.org/${ZOOM}/${x}/${y}.png`;
+  new THREE.TextureLoader().load(imgUrl, tex=>{
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(TILE_SIZE_M, TILE_SIZE_M),
+      new THREE.MeshPhongMaterial({map:tex})
+    );
+    m.rotation.x = -Math.PI/2;
+    m.position.set(baseX + TILE_SIZE_M/2, 0, baseZ + TILE_SIZE_M/2);
+    group.add(m);
+  });
+
+  /* ---- 建物 ---- */
+  geojson.elements.forEach(el=>{
+    if(el.type !== "way" || !el.geometry) return;
+
+    const shape = new THREE.Shape();
+    el.geometry.forEach((pt,i)=>{
+      const lx = ( (pt.lon - bbox.west) / (bbox.east - bbox.west) ) * TILE_SIZE_M;
+      const lz = ( (bbox.north - pt.lat) / (bbox.north - bbox.south) ) * TILE_SIZE_M;
+
+      if(i===0) shape.moveTo(baseX + lx, baseZ + lz);
+      else      shape.lineTo(baseX + lx, baseZ + lz);
+    });
+
+    const tags = el.tags || {};
+    let height = 10;
+    if(tags.height) height = parseFloat(tags.height);
+    else if(tags["building:levels"]) height = tags["building:levels"]*3;
+
+    const geo = new THREE.ExtrudeGeometry(shape, {depth: height, bevelEnabled:false});
+    const mat = new THREE.MeshPhongMaterial({map: windowTex});
+
+    const b = new THREE.Mesh(geo, mat);
+    b.rotation.x = -Math.PI/2;
+    b.position.y = height/2;
+    group.add(b);
+  });
+}
+
+/* ============================================
+   遠いタイルはアンロード
+============================================ */
+function unloadFarTiles(cx, cy){
+  const keys = Array.from(loadedTiles.keys());
+  for(const key of keys){
+    const [tx, ty] = key.split("_").map(n=>parseInt(n));
+
+    if(Math.abs(tx-cx) > LOAD_RADIUS+1 || Math.abs(ty-cy) > LOAD_RADIUS+1){
+      const group = loadedTiles.get(key);
+      scene.remove(group);
+      loadedTiles.delete(key);
+    }
+  }
+}
+
+/* ============================================
+   カメラ中心から必要タイルだけ読み込む
+============================================ */
+function updateTiles(){
+  // カメラの緯度経度を仮に東京中心にする（本格対応なら変換計算）
+  const camLon = 139.700;  // 例：渋谷近辺
+  const camLat = 35.660;
+
+  const cx = lon2tile(camLon, ZOOM);
+  const cy = lat2tile(camLat, ZOOM);
+
+  unloadFarTiles(cx, cy);
+
+  for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
+    for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
+      loadTile(cx+dx, cy+dy);
+    }
+  }
+}
+
+/* ============================================
+   Render Loop
+============================================ */
+function animate(){
+  requestAnimationFrame(animate);
+
+  // カメラの移動に合わせてタイル更新
+  updateTiles();
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+</script>
+</body>
+</html>
