@@ -337,8 +337,9 @@ function cameraToLonLat(){
   const tx = controls.target.x;
   const tz = controls.target.z;
   const m = worldToMerc(tx, tz, ORIGIN_M);
-  return mercToLonLat(m.x, m.y);
+  return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
 }
+
 function lonToTileX(lon, zoom){ return Math.floor((lon + 180) / 360 * Math.pow(2,zoom)); }
 function latToTileY(lat, zoom){
   const a = Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180));
