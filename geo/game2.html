@@ -247,9 +247,9 @@ scene.add(player);
 /* player velocity as vector so jump keeps horizontal velocity */
 const playerVel = new THREE.Vector3(0, 0, 0);
 const targetVel = new THREE.Vector3(0, 0, 0);
-const H_SPEED = 8.0 * SCALE * 4.0; // tune horizontal speed (scaled)4.0 * SCALE * 4.0;
+const H_SPEED = 12.0 * SCALE * 4.0; // tune horizontal speed (scaled)　：4.0 * SCALE * 4.0;
 const JUMP_SPEED = 18 * SCALE * 4.0; // tune jump (scaled)
-const GRAVITY = -40 * SCALE; // gravity per second^2 scaled
+const GRAVITY = -80 * SCALE; // gravity per second^2 scaled　：-40
 let canJump = true;
 
 /* Time */
