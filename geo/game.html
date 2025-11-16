@@ -1,147 +1,130 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<title>3D Game Camera Control</title>
+<meta charset="utf-8">
+<title>3D Map Character Control</title>
 <style>
 body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
-#info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px;}
-#joystick{
-  position: absolute;
-  bottom: 60px; left: 60px;
-  width: 120px; height: 120px;
-  border-radius: 50%; background: rgba(200,200,200,0.3);
-  touch-action: none; z-index: 15;
+#info{
+  position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);
+  padding:8px;border-radius:6px;font-size:13px;
 }
-#stick{
-  position: absolute;
-  width: 60px; height: 60px;
-  left: 30px; top: 30px;
-  border-radius: 50%; background: rgba(100,100,100,0.6);
-  touch-action: none;
+#joystick{
+  position:absolute;
+  bottom:50px; /* 下余白調整 */
+  left:50px;   /* 左余白調整 */
+  width:120px;
+  height:120px;
+  z-index:30;
 }
 </style>
 </head>
 <body>
-<div id="info">ドラッグで視点操作 / 左下で移動</div>
-<div id="joystick"><div id="stick"></div></div>
+<div id="info">スマホでジョイスティック操作可能</div>
+<div id="joystick"></div>
 
 <script src="https://unpkg.com/three@0.145.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.145.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.9.0/nipplejs.min.js"></script>
+
 <script>
-/* ===================== Three.js 初期化 ===================== */
+// ===================== Scene =====================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 200, 500);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 5000);
+camera.position.set(0, 200, 400);
 
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
 controls.enablePan = false;
-controls.enableZoom = false;
 
-scene.add(new THREE.AmbientLight(0xffffff,0.6));
-const dir = new THREE.DirectionalLight(0xffffff,0.9);
+// Light
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
 dir.position.set(500,1000,500);
 scene.add(dir);
 
-/* ===================== 床 ===================== */
-const floorGeo = new THREE.PlaneGeometry(2000,2000);
-const floorMat = new THREE.MeshPhongMaterial({color:0x999966});
-const floor = new THREE.Mesh(floorGeo,floorMat);
-floor.rotation.x=-Math.PI/2;
-scene.add(floor);
+// ===================== Ground =====================
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(2000,2000),
+  new THREE.MeshPhongMaterial({color:0x99cc99})
+);
+ground.rotation.x = -Math.PI/2;
+scene.add(ground);
 
-/* ===================== キャラクター ===================== */
-const playerGeo = new THREE.CapsuleGeometry(15,40,4,8);
-const playerMat = new THREE.MeshPhongMaterial({color:0xff5555});
-const player = new THREE.Mesh(playerGeo,playerMat);
-player.position.y=30;
+// ===================== Player =====================
+const playerGeometry = new THREE.CapsuleGeometry(5,20,4,8);
+const playerMaterial = new THREE.MeshPhongMaterial({color:0xff4444});
+const player = new THREE.Mesh(playerGeometry, playerMaterial);
+player.position.set(0,10,0);
 scene.add(player);
 
-/* ===================== Joystick ===================== */
-let joystickDir = new THREE.Vector2();
-const joystick = document.getElementById('joystick');
-const stick = document.getElementById('stick');
-let activeTouch = null;
+// ===================== Joystick =====================
+let joystickDir = {x:0, y:0};
+const joystick = nipplejs.create({
+  zone: document.getElementById('joystick'),
+  mode: 'static',
+  position: {left:'50px', bottom:'50px'},
+  color: 'gray',
+  size: 120
+});
+joystick.on('move', (evt, data)=>{
+  if(data && data.vector){
+    joystickDir.x = data.vector.x;
+    joystickDir.y = -data.vector.y; // 上下を反転
+  }
+});
+joystick.on('end', ()=>{
+  joystickDir.x = 0;
+  joystickDir.y = 0;
+});
 
-function handleTouchStart(e){ activeTouch = e.changedTouches[0].identifier; }
-function handleTouchMove(e){
-  if(activeTouch===null) return;
-  for(const t of e.changedTouches){
-    if(t.identifier!==activeTouch) continue;
-    const rect = joystick.getBoundingClientRect();
-    let dx = t.clientX - (rect.left + rect.width/2);
-    let dy = t.clientY - (rect.top + rect.height/2);
-    const maxDist = rect.width/2;
-    const dist = Math.min(Math.sqrt(dx*dx+dy*dy), maxDist);
-    const angle = Math.atan2(dy, dx);
-    dx = Math.cos(angle)*dist;
-    dy = Math.sin(angle)*dist;
-    stick.style.transform = `translate(${dx}px, ${dy}px)`;
-    joystickDir.set(dx/maxDist, -dy/maxDist); // 上で前進
+// ===================== Player Movement =====================
+const speed = 2;
+function updatePlayer(){
+  const dir = new THREE.Vector3(joystickDir.x,0,joystickDir.y);
+  if(dir.length() > 0.1){
+    dir.normalize();
+    // 回転方向
+    const targetAngle = Math.atan2(dir.x, dir.z);
+    // スムーズ回転
+    const delta = targetAngle - player.rotation.y;
+    player.rotation.y += delta*0.2;
+    // 移動
+    player.position.x += dir.x*speed;
+    player.position.z += dir.z*speed;
   }
 }
-function handleTouchEnd(e){
-  for(const t of e.changedTouches){
-    if(t.identifier===activeTouch){
-      activeTouch=null;
-      stick.style.transform = `translate(0px,0px)`;
-      joystickDir.set(0,0);
-    }
-  }
+
+// ===================== Camera Follow =====================
+const camOffset = new THREE.Vector3(0,100,200);
+function updateCamera(){
+  const desiredPos = player.position.clone().add(camOffset);
+  camera.position.lerp(desiredPos, 0.1);
+  controls.target.lerp(player.position.clone().add(new THREE.Vector3(0,10,0)), 0.1);
+  controls.update();
 }
 
-joystick.addEventListener('touchstart', handleTouchStart);
-joystick.addEventListener('touchmove', handleTouchMove);
-joystick.addEventListener('touchend', handleTouchEnd);
-joystick.addEventListener('touchcancel', handleTouchEnd);
-
-/* ===================== 移動 ===================== */
-const speed = 4;
-const camOffset = new THREE.Vector3(0,150,-300);
-
-function updatePlayer(delta){
-  if(joystickDir.length() > 0.1){
-    // カメラの水平角を基準に前方ベクトルを作る
-    const camYaw = Math.atan2(camera.position.x - player.position.x, camera.position.z - player.position.z);
-    const moveDir = new THREE.Vector3(joystickDir.x, 0, joystickDir.y);
-    moveDir.applyAxisAngle(new THREE.Vector3(0,1,0), camYaw);
-    player.position.add(moveDir.multiplyScalar(speed));
-    // キャラクターの向きを移動方向に回転
-    player.rotation.y = Math.atan2(moveDir.x, moveDir.z);
-  }
-
-  // カメラ滑らか追従
-  const desiredCamPos = player.position.clone().add(camOffset.clone().applyAxisAngle(new THREE.Vector3(0,1,0), 0));
-  camera.position.lerp(desiredCamPos, 0.1);
-  controls.target.lerp(player.position.clone().add(new THREE.Vector3(0,20,0)),0.1);
-}
-
-/* ===================== アニメーション ===================== */
-let lastTime = performance.now();
+// ===================== Animation Loop =====================
 function animate(){
   requestAnimationFrame(animate);
-  const now = performance.now();
-  const delta = (now-lastTime)/1000;
-  lastTime=now;
-
-  updatePlayer(delta);
-  controls.update();
+  updatePlayer();
+  updateCamera();
   renderer.render(scene,camera);
 }
 animate();
 
-/* ===================== Resize ===================== */
+// ===================== Resize =====================
 window.addEventListener('resize', ()=>{
-  renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
 });
 </script>
 </body>
