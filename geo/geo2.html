@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>Dynamic OSM 3D with LOD (Improved)</title>
+<title>Dynamic OSM 3D with LOD (Alignment Fix)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -16,34 +16,55 @@
 
 <script>
 /* ===========================
-   設定（必要なら調整）
+   設定
    =========================== */
 const ZOOM = 16;
 let LOAD_RADIUS = 1;
 document.getElementById('rad').textContent = LOAD_RADIUS;
 
-const TILE_SIZE_M = 200;
 const MAX_CONCURRENT_FETCH = 3;
 const OVERPASS_RETRY = 2;
 const OVERPASS_DELAY_MS = 300;
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 /* ===========================
-   WebMercator ユーティリティ
+   WebMercator / Tile helpers
+   Ensures we use the exact same math for tiles and features
    =========================== */
 const R = 6378137;
-function lonToMercX(lon){ return R * lon * Math.PI/180; }
-function latToMercY(lat){ const rad = lat * Math.PI/180; return R * Math.log(Math.tan(Math.PI/4 + rad/2)); }
-function mercXToLon(x){ return (x / R) * 180 / Math.PI; }
-function mercYToLat(y){ return (2 * Math.atan(Math.exp(y / R)) - Math.PI/2) * 180 / Math.PI; }
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
 
+// lon/lat -> WebMercator (meters), consistent with EPSG:3857
+function lonToMercX(lon){ return R * deg2rad(lon); }
+function latToMercY(lat){
+  const rad = deg2rad(lat);
+  return R * Math.log(Math.tan(Math.PI/4 + rad/2));
+}
+function mercXToLon(x){ return rad2deg(x / R); }
+function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
+
+// tile->lon/lat using standard WebMercator formulas (consistent with OSM)
 function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
-function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2,z); return (180 / Math.PI) * Math.atan(Math.sinh(n)); }
+function tile2lat(y,z){
+  // use atan(sinh(n)) formulation — standard and stable
+  const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+  return Math.atan(Math.sinh(n)) * 180 / Math.PI;
+}
 
+// convert lon/lat to merc coords (object with x,y meters)
 function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
-function mercToWorld(mx, my, origin){ return { x: mx - origin.x, z: -(my - origin.y) }; }
-function worldToMerc(wx, wz, origin){ return { x: wx + origin.x, y: -(wz) + origin.y }; }
-function mercToLonLat(mx, my){ return { lon: mercXToLon(mx), lat: mercYToLat(my) }; }
+
+// merc (meters) -> Three.js world coords using an origin (ORIGIN_M)
+function mercToWorld(mx, my, origin){
+  // world.x = mx - origin.x
+  // world.z = -(my - origin.y)  (so +z points SOUTH)
+  return { x: mx - origin.x, z: -(my - origin.y) };
+}
+function worldToMerc(wx, wz, origin){
+  // inverse of mercToWorld
+  return { x: wx + origin.x, y: -(wz) + origin.y };
+}
 
 /* ===========================
    Three.js 初期化
@@ -66,26 +87,30 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dir = new THREE.DirectionalLight(0xffffff, 0.9);
 dir.position.set(500,1000,500); scene.add(dir);
 
-/* 床の基準原点（mercator） — 東京中心を初期原点に */
+/* 世界原点 (mercator) を東京中心に設定 */
 const INIT_CENTER_LON = 139.6917;
 const INIT_CENTER_LAT = 35.6895;
 const ORIGIN_M = lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
 
-/* グローバルキャッシュ */
-const loadedTiles = new Map(); // key = `${x}_${y}` -> { group, lastUsed, bbox }
+/* キャッシュ & 管理 */
+const loadedTiles = new Map(); // key "x_y" => { group, lastUsed, bbox }
 const fetchQueue = [];
 let activeFetches = 0;
-const geoCache = new Map();   // "x_y" -> {bbox,json}
-const imgCache = new Map();   // tileUrl -> texture
+const geoCache = new Map(); // key "x_y" -> {bbox, json}
+const imgCache = new Map(); // tileUrl -> texture
 
-/* 窓テクスチャ */
 const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
 
 /* ===========================
-   Tile/Overpass helpers
+   Tile bbox and query
    =========================== */
 function tileBBoxLonLat(x,y,z){
-  return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) };
+  return {
+    west: tile2lon(x,z),
+    north: tile2lat(y,z),
+    east: tile2lon(x+1,z),
+    south: tile2lat(y+1,z)
+  };
 }
 function bboxToOverpassQuery(bbox){
   return `[out:json][timeout:25];
@@ -96,19 +121,23 @@ function bboxToOverpassQuery(bbox){
 out geom;`;
 }
 
-/* Fetch with retry + concurrency handled by queue */
+/* ===========================
+   Fetch management (queue + concurrency)
+   =========================== */
 async function fetchOverpassForTile(x,y,z, tries=0){
   const key = `${x}_${y}`;
   if(geoCache.has(key)) return geoCache.get(key);
   const bbox = tileBBoxLonLat(x,y,z);
   const query = bboxToOverpassQuery(bbox);
+
   try {
     activeFetches++;
     const res = await fetch(OVERPASS_URL, { method: "POST", body: query });
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    geoCache.set(key, { bbox, json });
-    return { bbox, json };
+    const data = { bbox, json };
+    geoCache.set(key, data);
+    return data;
   } catch(err){
     console.warn("Overpass fetch error", x,y, err);
     if(tries < OVERPASS_RETRY){
@@ -133,55 +162,52 @@ function processQueue(){
 }
 
 /* ===========================
-   Building creation (LOD + grounding)
+   Building creation (grounded + LOD)
    =========================== */
 
-/* create extruded geometry, rotate so height is along Y, and translate so bottom sits at y=0 */
-function createExtrudeMeshFromWay(el, bbox){
-  // Build shape in world coords (X,Y) where Y is north-south -> we'll use X = mercX, Y = mercY
+/* Create extruded mesh from an Overpass "way" element.
+   Important: we convert lon/lat -> merc -> world using EXACT same functions used for tile geometry.
+   Then we extrude and rotate so that bottom sits at y=0 (ground). */
+function createExtrudeMeshFromWay(el){
+  // shape in world X,Z coordinates (units = meters)
   const shape = new THREE.Shape();
   for(let i=0;i<el.geometry.length;i++){
     const pt = el.geometry[i];
-    const m = lonLatToMerc(pt.lon, pt.lat);
-    // convert to world relative to ORIGIN_M
-    const w = mercToWorld(m.x, m.y, ORIGIN_M);
+    const m = lonLatToMerc(pt.lon, pt.lat);        // meters
+    const w = mercToWorld(m.x, m.y, ORIGIN_M);    // world coords
     if(i===0) shape.moveTo(w.x, w.z);
     else shape.lineTo(w.x, w.z);
   }
 
+  // height from tags
   const tags = el.tags || {};
   let height = 10;
   if(tags.height) { height = parseFloat(String(tags.height).replace('m','')) || height; }
   else if(tags["building:levels"]) { height = (parseFloat(tags["building:levels"])||1) * 3; }
 
-  // create extrude geometry (extrudes along +Z)
+  // extrude along +Z, then rotate so extrusion becomes Y
   const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled:false });
-
-  // rotate so extrude (Z) becomes Y: rotate -90deg around X
   geo.rotateX(-Math.PI/2);
 
-  // compute bounding box and translate geometry so minY == 0
+  // ensure bottom sits at y=0: translate geometry by -minY
   geo.computeBoundingBox();
   const minY = geo.boundingBox.min.y;
-  if(minY !== 0) {
-    const ty = -minY;
-    geo.translate(0, ty, 0);
+  if(minY !== 0){
+    geo.translate(0, -minY, 0);
   }
 
   const mat = new THREE.MeshPhongMaterial({ map: windowTex, color: 0xccccff });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = false;
   mesh.receiveShadow = false;
-
-  return {mesh, height};
+  return { mesh, height };
 }
 
-/* create simple box LOD */
+/* Create simple box approximations for LOD */
 function createBoxLODFromWay(el, height){
-  // compute bbox of footprint in world coords
+  // compute footprint bbox in world coordinates
   let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
-  for(let i=0;i<el.geometry.length;i++){
-    const pt = el.geometry[i];
+  for(const pt of el.geometry){
     const m = lonLatToMerc(pt.lon, pt.lat);
     const w = mercToWorld(m.x, m.y, ORIGIN_M);
     if(w.x < minX) minX = w.x; if(w.x > maxX) maxX = w.x;
@@ -199,70 +225,34 @@ function createBoxLODFromWay(el, height){
   return box;
 }
 
-/* create LOD: detailed (extrude) + mid (box) + far (small box) */
 function createBuildingLOD(el){
-  const lod = new THREE.LOD();
-  const detailed = createExtrudeMeshFromWay(el).mesh;
-  lod.addLevel(detailed, 0);
-
-  // compute approximate height for mid/far boxes
   const tags = el.tags || {};
   let height = 10;
   if(tags.height) { height = parseFloat(String(tags.height).replace('m','')) || height; }
   else if(tags["building:levels"]) { height = (parseFloat(tags["building:levels"])||1) * 3; }
 
+  const lod = new THREE.LOD();
+  // detailed
+  try{
+    const det = createExtrudeMeshFromWay(el);
+    lod.addLevel(det.mesh, 0);
+  } catch(e){
+    console.warn("create detailed failed", e);
+  }
+  // mid
   const mid = createBoxLODFromWay(el, Math.max(3, height * 0.9));
-  lod.addLevel(mid, 200); // switch to mid at 200 units
-
+  lod.addLevel(mid, 200);
+  // far
   const far = createBoxLODFromWay(el, Math.max(3, height * 0.7));
-  lod.addLevel(far, 800); // switch to far at 800 units
-
-  // set lod position at origin (meshes already in world coords), so no translate
+  lod.addLevel(far, 800);
   return lod;
 }
 
 /* ===========================
-   add tile group
+   Tile add / floor placement
    =========================== */
-function addTileToScene(x,y,z, data){
-  const key = `${x}_${y}`;
-  if(loadedTiles.has(key)) return;
-
-  const group = new THREE.Group();
-  group.userData = { x, y, z, bbox: data.bbox };
-
-  // add floor image (centered)
-  const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-  if(imgCache.has(tileUrl)){
-    const tex = imgCache.get(tileUrl);
-    addFloorMeshToGroup(tex, data.bbox, group);
-  } else {
-    new THREE.TextureLoader().load(tileUrl, tex => {
-      tex.flipY = false;
-      imgCache.set(tileUrl, tex);
-      addFloorMeshToGroup(tex, data.bbox, group);
-    }, undefined, err => console.warn("tile image load err", tileUrl, err));
-  }
-
-  // add buildings (LOD)
-  const els = data.json.elements || [];
-  for(const el of els){
-    if(el.type !== "way" || !el.geometry) continue;
-    try {
-      const lod = createBuildingLOD(el);
-      group.add(lod);
-    } catch(e){
-      console.warn("building create err", e);
-    }
-  }
-
-  scene.add(group);
-  loadedTiles.set(key, { group, lastUsed: Date.now(), bbox: data.bbox });
-  console.log(`Tile added ${key} (buildings: ${els.length})`);
-}
-
 function addFloorMeshToGroup(tex, bbox, group){
-  // calculate merc meter size
+  // compute merc sizes from bbox using same lon/lat->merc functions
   const westMx = lonToMercX(bbox.west), eastMx = lonToMercX(bbox.east);
   const northMy = latToMercY(bbox.north), southMy = latToMercY(bbox.south);
   const mercW = eastMx - westMx;
@@ -281,14 +271,49 @@ function addFloorMeshToGroup(tex, bbox, group){
   group.add(plane);
 }
 
+function addTileToScene(x,y,z, data){
+  const key = `${x}_${y}`;
+  if(loadedTiles.has(key)) return;
+
+  const group = new THREE.Group();
+  group.userData = { x, y, z, bbox: data.bbox };
+
+  // floor image
+  const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+  if(imgCache.has(tileUrl)){
+    addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
+  } else {
+    new THREE.TextureLoader().load(tileUrl, tex => {
+      tex.flipY = false; // ensure orientation matches our plane geometry use
+      imgCache.set(tileUrl, tex);
+      addFloorMeshToGroup(tex, data.bbox, group);
+    }, undefined, err => console.warn("tile image load err", tileUrl, err));
+  }
+
+  // buildings as LODs
+  const els = data.json.elements || [];
+  for(const el of els){
+    if(el.type !== "way" || !el.geometry) continue;
+    try{
+      const lod = createBuildingLOD(el);
+      group.add(lod);
+    } catch(e){
+      console.warn("building create err", e);
+    }
+  }
+
+  scene.add(group);
+  loadedTiles.set(key, { group, lastUsed: Date.now(), bbox: data.bbox });
+  console.log(`Tile added ${key} (features: ${els.length})`);
+}
+
 /* ===========================
-   unload far tiles
+   Unload logic
    =========================== */
 function unloadFarTiles(centerTileX, centerTileY){
   for(const [key, info] of Array.from(loadedTiles)){
     const [tx, ty] = key.split("_").map(n=>parseInt(n,10));
     if(Math.abs(tx - centerTileX) > LOAD_RADIUS + 1 || Math.abs(ty - centerTileY) > LOAD_RADIUS + 1){
-      // dispose
       const grp = info.group;
       scene.remove(grp);
       grp.traverse(obj=>{
@@ -305,17 +330,15 @@ function unloadFarTiles(centerTileX, centerTileY){
 }
 
 /* ===========================
-   camera <-> lonlat helpers
+   Camera <-> lon/lat helpers
    =========================== */
-function worldToMercCoords(wx, wz){ return worldToMerc(wx, wz, ORIGIN_M); }
 function cameraToLonLat(){
+  // use controls.target for center
   const tx = controls.target.x;
   const tz = controls.target.z;
   const m = worldToMerc(tx, tz, ORIGIN_M);
   return mercToLonLat(m.x, m.y);
 }
-
-/* helpers for tile indices */
 function lonToTileX(lon, zoom){ return Math.floor((lon + 180) / 360 * Math.pow(2,zoom)); }
 function latToTileY(lat, zoom){
   const a = Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180));
@@ -323,11 +346,10 @@ function latToTileY(lat, zoom){
 }
 
 /* ===========================
-   Tile update logic
+   Tile update loop
    =========================== */
 let lastUpdate = 0;
 const MIN_UPDATE_INTERVAL = 1200;
-
 async function updateTilesAroundCamera(){
   const now = performance.now();
   if(now - lastUpdate < MIN_UPDATE_INTERVAL) return;
@@ -347,7 +369,6 @@ async function updateTilesAroundCamera(){
         loadedTiles.get(key).lastUsed = Date.now();
         continue;
       }
-      // enqueue fetch
       enqueueFetch(async ()=> {
         const res = await fetchOverpassForTile(tx, ty, ZOOM);
         if(res) addTileToScene(tx, ty, ZOOM, res);
@@ -364,7 +385,7 @@ function animate(){
   requestAnimationFrame(animate);
   controls.update();
 
-  // Update LODs: call LOD.update? Three's LOD is automatic via camera, but we must set camera reference when adding: call update on each LOD when rendering
+  // update LODs
   for(const [, info] of loadedTiles){
     info.group.traverse(obj=>{
       if(obj instanceof THREE.LOD) obj.update(camera);
@@ -389,11 +410,10 @@ window.addEventListener('keydown', (e)=>{
   if(e.key === "-"){ LOAD_RADIUS = Math.max(0, LOAD_RADIUS-1); document.getElementById('rad').textContent = LOAD_RADIUS; }
 });
 
-/* queue processor kickoff */
+/* start queue processor */
 processQueue();
 
-console.log("Improved Dynamic OSM viewer (LOD & grounding) started.");
-
+console.log("Alignment-fix Dynamic OSM viewer started.");
 </script>
 </body>
 </html>
