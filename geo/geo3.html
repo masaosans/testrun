@@ -212,7 +212,7 @@ function addTileToScene(x,y,z,data){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
         new THREE.TextureLoader().load(tileUrl, tex=>{
-            tex.flipY = false; // UV反転なし
+            tex.flipY = true; // UV反転なし
             imgCache.set(tileUrl, tex);
             addFloorMeshToGroup(tex, data.bbox, group);
         });
