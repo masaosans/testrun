@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (LOD + Roof)</title>
+<title>OSM 3D Viewer (Roof + LOD)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -140,6 +140,7 @@ function mercToWorld(mx, my){
     return { x: mx - ORIGIN_M.x, z: -(my - ORIGIN_M.y) };
 }
 
+// Extrude + Roof + LOD位置調整
 function createExtrudeMeshWithRoof(el){
     const shape = new THREE.Shape();
     let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
@@ -160,28 +161,22 @@ function createExtrudeMeshWithRoof(el){
     if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
     else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
 
-    // ExtrudeGeometry 作成
     const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled:false });
     geo.rotateX(-Math.PI/2);
-    geo.computeBoundingBox();
 
-    // Roof頂点
-    const roofHeight = height * 0.2;
-    const roofGeo = new THREE.Geometry();
-    geo.vertices.forEach(v=>{
-        const newV = v.clone();
-        newV.y += roofHeight;
-        roofGeo.vertices.push(newV);
-    });
-    for(let f of geo.faces){
-        roofGeo.faces.push(new THREE.Face3(f.a,f.b,f.c));
+    // 屋根を簡易的に表現（上にオフセット）
+    const roofHeight = height*0.2;
+    const position = geo.attributes.position;
+    for(let i=0;i<position.count;i++){
+        const y = position.getY(i);
+        position.setY(i, y + roofHeight);
     }
+    position.needsUpdate = true;
 
-    // Mesh 作成
     const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0xccccff });
     const mesh = new THREE.Mesh(geo, mat);
 
-    // 中心座標を Box LOD と合わせる
+    // createBoxLODFromWayと同じ位置に
     const cx = (minX + maxX)/2;
     const cz = (minZ + maxZ)/2;
     mesh.position.set(cx, height/2, cz);
@@ -217,8 +212,8 @@ function createBuildingLOD(el){
 
     const lod = new THREE.LOD();
     try{ lod.addLevel(createExtrudeMeshWithRoof(el),0); } catch(e){ console.warn("detail fail",e); }
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),500);
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),1000);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),2000);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),3000);
     return lod;
 }
 
@@ -331,7 +326,7 @@ window.addEventListener('keydown', e=>{
 });
 
 processQueue();
-console.log("Aligned Dynamic OSM viewer with Roof started.");
+console.log("Aligned Dynamic OSM viewer with Roof + LOD started.");
 </script>
 </body>
 </html>
