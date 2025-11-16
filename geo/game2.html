@@ -28,7 +28,7 @@ body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 <script>
 /* ===================== 設定 / ユーティリティ ===================== */
 const ZOOM = 16;
-let LOAD_RADIUS = 2;//tileの半径　1→
+let LOAD_RADIUS = 1;//tileの半径
 document.getElementById('rad').textContent = LOAD_RADIUS;
 
 const MAX_CONCURRENT_FETCH = 3;
@@ -64,7 +64,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 200, 400);
+camera.position.set(0, 180, 360);
 
 // OrbitControls: allow full rotation incl. up/down (with limits)
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
