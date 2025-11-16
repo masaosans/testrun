@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>3D Character Control with Free Camera</title>
+<title>3D Character Control with Camera Pitch</title>
 <style>
 body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
 #info{
@@ -33,7 +33,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 5000);
-camera.position.set(0, 200, 400);
+camera.position.set(0, 150, 300);
 
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -43,6 +43,8 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.1;
 controls.enablePan = false;
+controls.minPolarAngle = Math.PI/6;  // 上下回転下限（30°）
+controls.maxPolarAngle = Math.PI/2.3; // 上下回転上限（約77°）
 controls.target.set(0,10,0);
 
 // Light
@@ -109,9 +111,12 @@ function updatePlayer(){
 }
 
 // ===================== Camera Follow =====================
-const camOffset = new THREE.Vector3(0,100,200);
+const camOffset = new THREE.Vector3(0,120,220);
 function updateCamera(){
-  const desiredPos = player.position.clone().add(camOffset.clone().applyAxisAngle(new THREE.Vector3(0,1,0), controls.getAzimuthalAngle()));
+  // カメラは水平距離と高さを維持しつつOrbitControlsで上下回転を自由に
+  const horizontalOffset = new THREE.Vector3(camOffset.x,0,camOffset.z);
+  horizontalOffset.applyAxisAngle(new THREE.Vector3(0,1,0), controls.getAzimuthalAngle());
+  const desiredPos = player.position.clone().add(horizontalOffset).add(new THREE.Vector3(0,camOffset.y,0));
   camera.position.lerp(desiredPos, 0.1);
   controls.target.lerp(player.position.clone().add(new THREE.Vector3(0,10,0)), 0.1);
   controls.update();
