@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Mapbox Tiles)</title>
+<title>OSM 3D Viewer (Aligned Floor)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -112,25 +112,26 @@ function processQueue(){
     job.fn().then(r=>job.resolve(r)).finally(()=>setTimeout(processQueue, OVERPASS_DELAY_MS));
 }
 
-/* ===================== 床タイル ===================== */
+/* ===================== 床タイル（修正版） ===================== */
 function addFloorMeshToGroup(tex, bbox, group){
     const westMx = lonToMercX(bbox.west);
     const eastMx = lonToMercX(bbox.east);
     const northMy = latToMercY(bbox.north);
     const southMy = latToMercY(bbox.south);
 
-    const mercW = eastMx - westMx;
-    const mercH = northMy - southMy;
+    const width = eastMx - westMx;
+    const height = northMy - southMy;
 
     const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
     const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
 
     const plane = new THREE.Mesh(
-        new THREE.PlaneGeometry(mercW, mercH),
+        new THREE.PlaneGeometry(width, height),
         new THREE.MeshPhongMaterial({ map: tex })
     );
     plane.rotation.x = -Math.PI/2;
     plane.position.set(centerX, 0, centerZ);
+
     group.add(plane);
 }
 
@@ -206,9 +207,7 @@ function addTileToScene(x,y,z,data){
     const group = new THREE.Group();
     group.userData={x,y,z,bbox:data.bbox};
 
-    // Mapbox タイル URL (デモ用アクセストークン)
-    const tileUrl = `https://api.mapbox.com/styles/v1/mapbox/streets-v11/tiles/256/${z}/${x}/${y}?access_token=pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndjN6bGZ3N2gifQ.1f5K8YHB_9yL-7c5Uj5ZJw`;
-
+    const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
     if(imgCache.has(tileUrl)){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
@@ -309,7 +308,7 @@ window.addEventListener('keydown', e=>{
 });
 
 processQueue();
-console.log("Mapbox-aligned Dynamic OSM viewer started.");
+console.log("Aligned Dynamic OSM viewer started.");
 </script>
 </body>
 </html>
