@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Click Name)</title>
+<title>OSM 3D Viewer (Click Name Adjusted)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -111,7 +111,10 @@ function addFloorMeshToGroup(tex, bbox, group){
     const mercH = northMy - southMy;
     const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
     const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(mercW, mercH), new THREE.MeshPhongMaterial({ map: tex }));
+    const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(mercW, mercH),
+        new THREE.MeshPhongMaterial({ map: tex, side: THREE.DoubleSide })
+    );
     plane.rotation.x = -Math.PI/2;
     plane.position.set(centerX, 0, centerZ);
     group.add(plane);
@@ -139,107 +142,11 @@ function createExtrudeMeshFromWay(el){
     const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0xccccff });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = height/2;
-    mesh.userData.name = tags.name || null; // 名前を保持
+    mesh.userData.name = tags.name || null;
     return mesh;
 }
 
-function createBoxLODFromWay(el,height){
-    let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
-    for(const pt of el.geometry){
-        const m = lonLatToMerc(pt.lon, pt.lat);
-        const w = mercToWorld(m.x, m.y);
-        if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
-        if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
-    }
-    const sx = Math.max(1,maxX-minX);
-    const sz = Math.max(1,maxZ-minZ);
-    const cx = (minX+maxX)/2;
-    const cz = (minZ+maxZ)/2;
-    const geo = new THREE.BoxGeometry(sx,height,sz);
-    const mat = new THREE.MeshPhongMaterial({color:0x999999});
-    const box = new THREE.Mesh(geo, mat);
-    box.userData.name = el.tags ? el.tags.name : null;
-    box.position.set(cx, height/2, cz);
-    return box;
-}
-
-function createBuildingLOD(el){
-    const tags = el.tags||{};
-    let height = 10;
-    if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
-    else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
-    const lod = new THREE.LOD();
-    try{ lod.addLevel(createExtrudeMeshFromWay(el),0); } catch(e){ console.warn("detail fail",e); }
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),200);
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),800);
-    return lod;
-}
-
-/* ===================== タイル追加 ===================== */
-function addTileToScene(x,y,z,data){
-    const key = `${x}_${y}`;
-    if(loadedTiles.has(key)) return;
-    const group = new THREE.Group();
-    group.userData={x,y,z,bbox:data.bbox};
-    const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-    if(imgCache.has(tileUrl)){ addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group); }
-    else { new THREE.TextureLoader().load(tileUrl, tex=>{ tex.flipY=false; imgCache.set(tileUrl, tex); addFloorMeshToGroup(tex, data.bbox, group); }); }
-    const els = data.json.elements||[];
-    for(const el of els){
-        if(el.type!=="way"||!el.geometry) continue;
-        try{ group.add(createBuildingLOD(el)); } catch(e){ console.warn("building create err",e); }
-    }
-    scene.add(group);
-    loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
-}
-
-/* ===================== タイル管理 ===================== */
-function unloadFarTiles(cx,cy){
-    for(const [key,info] of Array.from(loadedTiles)){
-        const [tx,ty] = key.split("_").map(n=>parseInt(n,10));
-        if(Math.abs(tx-cx)>LOAD_RADIUS+1 || Math.abs(ty-cy)>LOAD_RADIUS+1){
-            const grp = info.group;
-            scene.remove(grp);
-            grp.traverse(obj=>{ if(obj.geometry) obj.geometry.dispose(); if(obj.material) Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose(); });
-            loadedTiles.delete(key);
-        }
-    }
-}
-
-/* ===================== カメラ中心 ===================== */
-function cameraToLonLat(){
-    const tx = controls.target.x;
-    const tz = controls.target.z;
-    const m = { x: tx + ORIGIN_M.x, y: -(tz) + ORIGIN_M.y };
-    return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
-}
-
-/* ===================== Tile 更新ループ ===================== */
-let lastUpdate=0;
-const MIN_UPDATE_INTERVAL=1200;
-async function updateTilesAroundCamera(){
-    const now = performance.now();
-    if(now - lastUpdate < MIN_UPDATE_INTERVAL) return;
-    lastUpdate = now;
-    const center = cameraToLonLat();
-    const cx = lonToTileX(center.lon, ZOOM);
-    const cy = latToTileY(center.lat, ZOOM);
-    unloadFarTiles(cx, cy);
-    for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
-        for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
-            const tx=cx+dx, ty=cy+dy;
-            const key=`${tx}_${ty}`;
-            if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
-            enqueueFetch(async()=>{
-                const res = await fetchOverpassForTile(tx, ty, ZOOM);
-                if(res) addTileToScene(tx, ty, ZOOM, res);
-                return res;
-            });
-        }
-    }
-}
-
-/* ===================== クリック建物名表示 ===================== */
+/* ===================== ラベル関連 ===================== */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let currentLabel = null;
@@ -269,7 +176,9 @@ renderer.domElement.addEventListener('click', e=>{
     const intersects = raycaster.intersectObjects(scene.children, true);
     for(const i of intersects){
         if(i.object.userData && i.object.userData.name){
-            const pos = i.object.position.clone(); pos.y += i.object.geometry.boundingBox ? i.object.geometry.boundingBox.max.y + 10 : 20;
+            const pos = i.object.position.clone(); 
+            const geo = i.object.geometry.boundingBox;
+            pos.y += geo ? geo.max.y * 1.2 : 50; // 建物より少し上にラベル
             addLabel(i.object.userData.name, pos);
             break;
         }
@@ -291,12 +200,6 @@ window.addEventListener('resize', ()=>{
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
-});
-
-/* keyboard radius */
-window.addEventListener('keydown', e=>{
-    if(e.key==="+"){ LOAD_RADIUS=Math.min(4,LOAD_RADIUS+1); }
-    if(e.key==="-"){ LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1); }
 });
 
 processQueue();
