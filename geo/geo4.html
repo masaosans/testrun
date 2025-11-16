@@ -142,10 +142,33 @@ function mercToWorld(mx, my){
 
 // Extrude + Roof + LOD位置調整
 function createExtrudeMeshWithRoof(way, tileX, tileY, zoom) {
-    const coords = way.geometry[0].map(p => lonLatToWorld(p[0], p[1]));
 
     // -----------------------------
-    // 1. centroid（重心）を求める
+    // 0. Polygon / MultiPolygon の座標抽出
+    // -----------------------------
+    let rings = [];
+
+    if (way.geometry.type === "Polygon") {
+        rings = way.geometry.coordinates[0]; // outer ring
+    } else if (way.geometry.type === "MultiPolygon") {
+        rings = way.geometry.coordinates[0][0]; // 最初のポリゴンの outer ring
+    } else {
+        console.warn("Unsupported geometry type:", way.geometry.type);
+        return null;
+    }
+
+    if (!rings || !Array.isArray(rings) || rings.length < 3) {
+        console.warn("Invalid polygon:", rings);
+        return null;
+    }
+
+    // -----------------------------
+    // 1. lon/lat → world (x,z)
+    // -----------------------------
+    const coords = rings.map(p => lonLatToWorld(p[0], p[1]));
+
+    // -----------------------------
+    // 2. centroid（重心）を求める
     // -----------------------------
     let cx = 0, cz = 0;
     coords.forEach(c => { cx += c.x; cz += c.z; });
@@ -153,36 +176,34 @@ function createExtrudeMeshWithRoof(way, tileX, tileY, zoom) {
     cz /= coords.length;
 
     // -----------------------------
-    // 2. ローカル座標に変換
+    // 3. ローカル座標（centroid 基準）へ
     // -----------------------------
     const shapePoints = coords.map(c => new THREE.Vector2(c.x - cx, c.z - cz));
-
     const shape = new THREE.Shape(shapePoints);
 
     // -----------------------------
-    // 3. Extrude 用設定
+    // 4. 高さ
     // -----------------------------
-    const height = (way.tags && way.tags.height) ? parseFloat(way.tags.height) : 15;
+    const height = way.tags && way.tags.height ? parseFloat(way.tags.height) : 15;
 
+    // -----------------------------
+    // 5. Extrude 本体
+    // -----------------------------
     const extrudeSettings = {
         depth: height,
         bevelEnabled: false,
         curveSegments: 1
     };
 
-    // -----------------------------
-    // 4. ExtrudeGeometry（屋根なし本体）
-    // -----------------------------
     const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     const material = new THREE.MeshStandardMaterial({ color: 0xdddddd });
     const mesh = new THREE.Mesh(geometry, material);
 
     // -----------------------------
-    // 5. 屋根ポリゴン（上面）
+    // 6. Roof
     // -----------------------------
-    const roofShape = new THREE.Shape(shapePoints);
-    const roofGeom = new THREE.ShapeGeometry(roofShape);
-    roofGeom.translate(0, height, 0); // 本体上に置く
+    const roofGeom = new THREE.ShapeGeometry(shape);
+    roofGeom.translate(0, height, 0);
 
     const roofMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb });
     const roof = new THREE.Mesh(roofGeom, roofMat);
@@ -190,7 +211,7 @@ function createExtrudeMeshWithRoof(way, tileX, tileY, zoom) {
     mesh.add(roof);
 
     // -----------------------------
-    // 6. 位置を BoxLOD と完全一致
+    // 7. BoxLOD と同じ座標方式へ統一
     // -----------------------------
     mesh.position.set(cx, 0, cz);
 
@@ -199,6 +220,7 @@ function createExtrudeMeshWithRoof(way, tileX, tileY, zoom) {
 
     return mesh;
 }
+
 
 function createBoxLODFromWay(el,height){
     let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
