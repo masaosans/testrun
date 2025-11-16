@@ -183,7 +183,7 @@ function addTileToScene(x,y,z,data){
     group.userData={x,y,z,bbox:data.bbox};
     const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
     if(imgCache.has(tileUrl)){ addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group); }
-    else { new THREE.TextureLoader().load(tileUrl, tex=>{ tex.flipY=false; imgCache.set(tileUrl, tex); addFloorMeshToGroup(tex, data.bbox, group); }); }
+    else { new THREE.TextureLoader().load(tileUrl, tex=>{ tex.flipY=true; imgCache.set(tileUrl, tex); addFloorMeshToGroup(tex, data.bbox, group); }); }
     const els = data.json.elements||[];
     for(const el of els){
         if(el.type!=="way"||!el.geometry) continue;
