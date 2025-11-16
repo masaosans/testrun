@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Buildings + Roads + Parks + Water)</title>
+<title>OSM 3D Viewer (Aligned Fix)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -78,18 +78,8 @@ const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.pn
 function tileBBoxLonLat(x,y,z){
     return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) };
 }
-
-/* Overpass クエリを建物＋道路＋公園＋水域に対応 */
 function bboxToOverpassQuery(bbox){
-    return `[out:json][timeout:25];
-        (
-            way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-            way["highway"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-            way["leisure"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-            way["natural"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});
-        );
-        (._;>;);
-        out geom;`;
+    return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`;
 }
 
 /* ===================== Fetch Queue ===================== */
@@ -133,7 +123,7 @@ function addFloorMeshToGroup(tex, bbox, group){
     const mercH = northMy - southMy;
 
     const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
-    const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
+    const centerZ = ((northMy + southMy)/2 - ORIGIN_M.y); // 符号修正
 
     const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(mercW, mercH),
@@ -141,6 +131,11 @@ function addFloorMeshToGroup(tex, bbox, group){
     );
     plane.rotation.x = -Math.PI/2;
     plane.position.set(centerX, 0, centerZ);
+
+    // UV反転で画像上下ずれ補正
+    plane.geometry.faceVertexUvs[0].forEach(uvs => uvs.forEach(uv => uv.y = 1 - uv.y));
+    plane.geometry.uvsNeedUpdate = true;
+
     group.add(plane);
 }
 
@@ -208,35 +203,6 @@ function createBuildingLOD(el){
     return lod;
 }
 
-/* ===================== 建物以外 ===================== */
-function createGenericMesh(el){
-    const shape = new THREE.Shape();
-    for(let i=0;i<el.geometry.length;i++){
-        const pt = el.geometry[i];
-        const m = lonLatToMerc(pt.lon, pt.lat);
-        const w = mercToWorld(m.x, m.y);
-        if(i===0) shape.moveTo(w.x, w.z);
-        else shape.lineTo(w.x, w.z);
-    }
-
-    let height = 1;
-    if(el.tags["highway"]) height = 0.2;
-    else if(el.tags["leisure"] || el.tags["natural"]) height = 0.1;
-
-    const geo = new THREE.ExtrudeGeometry(shape,{depth:height,bevelEnabled:false});
-    geo.rotateX(-Math.PI/2);
-
-    let color = 0x999999;
-    if(el.tags["highway"]) color = 0x444444;
-    else if(el.tags["leisure"]) color = 0x33cc33;
-    else if(el.tags["natural"]) color = 0x3399ff;
-
-    const mat = new THREE.MeshPhongMaterial({color});
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.y = height/2;
-    return mesh;
-}
-
 /* ===================== タイル追加 ===================== */
 function addTileToScene(x,y,z,data){
     const key = `${x}_${y}`;
@@ -250,7 +216,7 @@ function addTileToScene(x,y,z,data){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
         new THREE.TextureLoader().load(tileUrl, tex=>{
-            tex.flipY=false;
+            tex.flipY = true; // ←上下反転
             imgCache.set(tileUrl, tex);
             addFloorMeshToGroup(tex, data.bbox, group);
         });
@@ -259,10 +225,7 @@ function addTileToScene(x,y,z,data){
     const els = data.json.elements||[];
     for(const el of els){
         if(el.type!=="way"||!el.geometry) continue;
-        try{
-            if(el.tags["building"]) group.add(createBuildingLOD(el));
-            else group.add(createGenericMesh(el));
-        } catch(e){ console.warn("mesh create err",e); }
+        try{ group.add(createBuildingLOD(el)); } catch(e){ console.warn("building create err",e); }
     }
 
     scene.add(group);
@@ -349,7 +312,7 @@ window.addEventListener('keydown', e=>{
 });
 
 processQueue();
-console.log("Aligned Dynamic OSM viewer started (Buildings + Roads + Parks + Water).");
+console.log("Aligned Dynamic OSM viewer started.");
 </script>
 </body>
 </html>
