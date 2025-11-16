@@ -64,17 +64,18 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 180, 360);
+camera.position.set(0, 100, 200);
 
 // OrbitControls: allow full rotation incl. up/down (with limits)
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = true; // allow panning as well
+controls.enableZoom = false;
 controls.minDistance = 5;//描画範囲Min　10→
 controls.maxDistance = 1000;//描画範囲Max　2000→
 controls.minPolarAngle = Math.PI * 0.20; // 上限 (tilt up)
-controls.maxPolarAngle = Math.PI * 0.8;  // 下限 (tilt down)
+controls.maxPolarAngle = Math.PI * 0.15;  // 下限 (tilt down)
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
