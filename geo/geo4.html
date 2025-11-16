@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Roof LOD)</title>
+<title>OSM 3D Viewer (LOD + Roof)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -20,6 +20,7 @@
 const ZOOM = 16;
 let LOAD_RADIUS = 1;
 document.getElementById('rad').textContent = LOAD_RADIUS;
+
 const MAX_CONCURRENT_FETCH = 3;
 const OVERPASS_RETRY = 2;
 const OVERPASS_DELAY_MS = 300;
@@ -27,17 +28,19 @@ const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 /* ===================== WebMercator / Tile ===================== */
 const R = 6378137;
-function deg2rad(d){ return d*Math.PI/180; }
-function rad2deg(r){ return r*180/Math.PI; }
-function lonToMercX(lon){ return R*deg2rad(lon); }
-function latToMercY(lat){ return R*Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/2)); }
-function mercXToLon(x){ return rad2deg(x/R); }
-function mercYToLat(y){ return rad2deg(2*Math.atan(Math.exp(y/R)) - Math.PI/2); }
+function deg2rad(d){ return d * Math.PI / 180; }
+function rad2deg(r){ return r * 180 / Math.PI; }
+function lonToMercX(lon){ return R * deg2rad(lon); }
+function latToMercY(lat){ return R * Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/2)); }
+function mercXToLon(x){ return rad2deg(x / R); }
+function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
 function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
-function tile2lon(x,z){ return x/Math.pow(2,z)*360-180; }
-function tile2lat(y,z){ const n=Math.PI-2*Math.PI*y/Math.pow(2,z); return Math.atan(Math.sinh(n))*180/Math.PI; }
-function lonToTileX(lon,zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
-function latToTileY(lat,zoom){ const a = Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180)); return Math.floor((1 - a/Math.PI)/2*Math.pow(2,zoom)); }
+
+function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
+function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2,z); return Math.atan(Math.sinh(n)) * 180 / Math.PI; }
+
+function lonToTileX(lon, zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
+function latToTileY(lat, zoom){ const a = Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180)); return Math.floor((1 - a/Math.PI)/2*Math.pow(2,zoom)); }
 
 /* ===================== ORIGIN ===================== */
 const INIT_CENTER_LON = 139.6917;
@@ -72,8 +75,12 @@ const imgCache = new Map();
 const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
 
 /* ===================== Tile bbox ===================== */
-function tileBBoxLonLat(x,y,z){ return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) }; }
-function bboxToOverpassQuery(bbox){ return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`; }
+function tileBBoxLonLat(x,y,z){
+    return { west: tile2lon(x,z), north: tile2lat(y,z), east: tile2lon(x+1,z), south: tile2lat(y+1,z) };
+}
+function bboxToOverpassQuery(bbox){
+    return `[out:json][timeout:25];(way["building"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););(._;>;);out geom;`;
+}
 
 /* ===================== Fetch Queue ===================== */
 async function fetchOverpassForTile(x,y,z, tries=0){
@@ -81,7 +88,8 @@ async function fetchOverpassForTile(x,y,z, tries=0){
     if(geoCache.has(key)) return geoCache.get(key);
     const bbox = tileBBoxLonLat(x,y,z);
     const query = bboxToOverpassQuery(bbox);
-    try{
+
+    try {
         activeFetches++;
         const res = await fetch(OVERPASS_URL, {method:"POST", body:query});
         if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -106,27 +114,45 @@ function processQueue(){
 
 /* ===================== 床タイル ===================== */
 function addFloorMeshToGroup(tex, bbox, group){
-    const westMx = lonToMercX(bbox.west), eastMx = lonToMercX(bbox.east);
-    const northMy = latToMercY(bbox.north), southMy = latToMercY(bbox.south);
-    const mercW = eastMx - westMx, mercH = northMy - southMy;
+    const westMx = lonToMercX(bbox.west);
+    const eastMx = lonToMercX(bbox.east);
+    const northMy = latToMercY(bbox.north);
+    const southMy = latToMercY(bbox.south);
+
+    const mercW = eastMx - westMx;
+    const mercH = northMy - southMy;
+
     const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
     const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(mercW, mercH), new THREE.MeshPhongMaterial({ map: tex }));
+
+    const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(mercW, mercH),
+        new THREE.MeshPhongMaterial({ map: tex })
+    );
     plane.rotation.x = -Math.PI/2;
     plane.position.set(centerX, 0, centerZ);
+
     group.add(plane);
 }
 
 /* ===================== 建物 ===================== */
-function mercToWorld(mx,my){ return { x: mx-ORIGIN_M.x, z: -(my-ORIGIN_M.y) }; }
+function mercToWorld(mx, my){
+    return { x: mx - ORIGIN_M.x, z: -(my - ORIGIN_M.y) };
+}
 
 function createExtrudeMeshWithRoof(el){
     const shape = new THREE.Shape();
+    let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
+
     for(let i=0;i<el.geometry.length;i++){
-        const pt=el.geometry[i];
-        const m=lonLatToMerc(pt.lon, pt.lat);
-        const w=mercToWorld(m.x,m.y);
-        if(i===0) shape.moveTo(w.x,w.z); else shape.lineTo(w.x,w.z);
+        const pt = el.geometry[i];
+        const m = lonLatToMerc(pt.lon, pt.lat);
+        const w = mercToWorld(m.x, m.y);
+        if(i===0) shape.moveTo(w.x, w.z);
+        else shape.lineTo(w.x, w.z);
+
+        minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x);
+        minZ = Math.min(minZ, w.z); maxZ = Math.max(maxZ, w.z);
     }
 
     const tags = el.tags||{};
@@ -134,54 +160,48 @@ function createExtrudeMeshWithRoof(el){
     if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
     else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
 
-    let roofHeight = tags["roof:height"] ? parseFloat(String(tags["roof:height"]).replace('m',''))||0 : 0;
-    let roofShape = tags["roof:shape"] || null;
-
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    // ExtrudeGeometry 作成
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled:false });
     geo.rotateX(-Math.PI/2);
     geo.computeBoundingBox();
-    geo.translate(0, -geo.boundingBox.min.y, 0);
 
-    const mat = new THREE.MeshPhongMaterial({ map: windowTex, color: 0xccccff });
-    const mesh = new THREE.Mesh(geo, mat);
-
-    if(roofShape && roofHeight>0){
-        const positions = geo.attributes.position;
-        const center = geo.boundingBox.getCenter(new THREE.Vector3());
-        for(let i=0;i<positions.count;i++){
-            let y = positions.getY(i);
-            if(Math.abs(y - height)<0.1){
-                let x = positions.getX(i), z = positions.getZ(i);
-                if(roofShape==="pyramidal"){
-                    const dx = (x - center.x), dz = (z - center.z);
-                    const d = Math.sqrt(dx*dx+dz*dz);
-                    const maxD = Math.max(geo.boundingBox.max.x - geo.boundingBox.min.x, geo.boundingBox.max.z - geo.boundingBox.min.z)/2;
-                    positions.setY(i, y + roofHeight*(1 - d/maxD));
-                } else if(roofShape==="gable"){
-                    const dx = Math.abs(x - center.x);
-                    const maxX = (geo.boundingBox.max.x - geo.boundingBox.min.x)/2;
-                    positions.setY(i, y + roofHeight*(1 - dx/maxX));
-                }
-            }
-        }
-        positions.needsUpdate=true;
-        geo.computeVertexNormals();
+    // Roof頂点
+    const roofHeight = height * 0.2;
+    const roofGeo = new THREE.Geometry();
+    geo.vertices.forEach(v=>{
+        const newV = v.clone();
+        newV.y += roofHeight;
+        roofGeo.vertices.push(newV);
+    });
+    for(let f of geo.faces){
+        roofGeo.faces.push(new THREE.Face3(f.a,f.b,f.c));
     }
 
-    mesh.position.y = 0;
+    // Mesh 作成
+    const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0xccccff });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // 中心座標を Box LOD と合わせる
+    const cx = (minX + maxX)/2;
+    const cz = (minZ + maxZ)/2;
+    mesh.position.set(cx, height/2, cz);
+
     return mesh;
 }
 
 function createBoxLODFromWay(el,height){
-    let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity;
+    let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
     for(const pt of el.geometry){
-        const m=lonLatToMerc(pt.lon,pt.lat);
-        const w=mercToWorld(m.x,m.y);
+        const m = lonLatToMerc(pt.lon, pt.lat);
+        const w = mercToWorld(m.x, m.y);
         if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
         if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
     }
-    const sx = Math.max(1,maxX-minX), sz = Math.max(1,maxZ-minZ);
-    const cx = (minX+maxX)/2, cz = (minZ+maxZ)/2;
+    const sx = Math.max(1,maxX-minX);
+    const sz = Math.max(1,maxZ-minZ);
+    const cx = (minX+maxX)/2;
+    const cz = (minZ+maxZ)/2;
+
     const geo = new THREE.BoxGeometry(sx,height,sz);
     const mat = new THREE.MeshPhongMaterial({color:0x999999});
     const box = new THREE.Mesh(geo, mat);
@@ -189,7 +209,7 @@ function createBoxLODFromWay(el,height){
     return box;
 }
 
-function createBuildingLODWithRoof(el){
+function createBuildingLOD(el){
     const tags = el.tags||{};
     let height = 10;
     if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
@@ -197,8 +217,8 @@ function createBuildingLODWithRoof(el){
 
     const lod = new THREE.LOD();
     try{ lod.addLevel(createExtrudeMeshWithRoof(el),0); } catch(e){ console.warn("detail fail",e); }
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),2000);
-    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),3000);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.9)),500);
+    lod.addLevel(createBoxLODFromWay(el,Math.max(3,height*0.7)),1000);
     return lod;
 }
 
@@ -206,6 +226,7 @@ function createBuildingLODWithRoof(el){
 function addTileToScene(x,y,z,data){
     const key = `${x}_${y}`;
     if(loadedTiles.has(key)) return;
+
     const group = new THREE.Group();
     group.userData={x,y,z,bbox:data.bbox};
 
@@ -214,7 +235,7 @@ function addTileToScene(x,y,z,data){
         addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
     } else {
         new THREE.TextureLoader().load(tileUrl, tex=>{
-            tex.flipY=true;
+            tex.flipY = true;
             imgCache.set(tileUrl, tex);
             addFloorMeshToGroup(tex, data.bbox, group);
         });
@@ -223,7 +244,7 @@ function addTileToScene(x,y,z,data){
     const els = data.json.elements||[];
     for(const el of els){
         if(el.type!=="way"||!el.geometry) continue;
-        try{ group.add(createBuildingLODWithRoof(el)); } catch(e){ console.warn("building create err",e); }
+        try{ group.add(createBuildingLOD(el)); } catch(e){ console.warn("building create err",e); }
     }
 
     scene.add(group);
@@ -252,7 +273,7 @@ function unloadFarTiles(cx,cy){
 function cameraToLonLat(){
     const tx = controls.target.x;
     const tz = controls.target.z;
-    const m = { x: tx+ORIGIN_M.x, y: -(tz)+ORIGIN_M.y };
+    const m = { x: tx + ORIGIN_M.x, y: -(tz) + ORIGIN_M.y };
     return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
 }
 
