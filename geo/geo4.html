@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer (Click Name Adjusted)</title>
+<title>OSM 3D Viewer (Click Label Complete)</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
   #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
@@ -10,7 +10,7 @@
 </head>
 <body>
 <div id="info">
-  ドラッグで移動 / ホイールでズーム。建物をクリックすると名前を表示
+  ドラッグで移動 / ホイールでズーム。建物をクリックまたはタップすると名前を表示
 </div>
 
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
@@ -20,7 +20,6 @@
 /* ===================== 設定 ===================== */
 const ZOOM = 16;
 let LOAD_RADIUS = 1;
-
 const MAX_CONCURRENT_FETCH = 3;
 const OVERPASS_RETRY = 2;
 const OVERPASS_DELAY_MS = 300;
@@ -35,7 +34,6 @@ function latToMercY(lat){ return R * Math.log(Math.tan(Math.PI/4 + deg2rad(lat)/
 function mercXToLon(x){ return rad2deg(x / R); }
 function mercYToLat(y){ return rad2deg(2 * Math.atan(Math.exp(y / R)) - Math.PI/2); }
 function lonLatToMerc(lon, lat){ return { x: lonToMercX(lon), y: latToMercY(lat) }; }
-
 function tile2lon(x,z){ return x / Math.pow(2,z) * 360 - 180; }
 function tile2lat(y,z){ const n = Math.PI - 2 * Math.PI * y / Math.pow(2,z); return Math.atan(Math.sinh(n)) * 180 / Math.PI; }
 function lonToTileX(lon, zoom){ return Math.floor((lon+180)/360*Math.pow(2,zoom)); }
@@ -143,7 +141,89 @@ function createExtrudeMeshFromWay(el){
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.y = height/2;
     mesh.userData.name = tags.name || null;
+    mesh.userData.height = height;
     return mesh;
+}
+
+/* ===================== タイル追加 ===================== */
+function addTileToScene(x,y,z,data){
+    const key = `${x}_${y}`;
+    if(loadedTiles.has(key)) return;
+
+    const group = new THREE.Group();
+    group.userData={x,y,z,bbox:data.bbox};
+
+    const tileUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+    if(imgCache.has(tileUrl)){
+        addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
+    } else {
+        new THREE.TextureLoader().load(tileUrl, tex=>{
+            tex.flipY=true; // OSMタイル調整
+            imgCache.set(tileUrl, tex);
+            addFloorMeshToGroup(tex, data.bbox, group);
+        });
+    }
+
+    const els = data.json.elements||[];
+    for(const el of els){
+        if(el.type!=="way"||!el.geometry) continue;
+        try{ group.add(createExtrudeMeshFromWay(el)); } catch(e){ console.warn("building create err",e); }
+    }
+
+    scene.add(group);
+    loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
+}
+
+/* ===================== タイル管理 ===================== */
+function unloadFarTiles(cx,cy){
+    for(const [key,info] of Array.from(loadedTiles)){
+        const [tx,ty] = key.split("_").map(n=>parseInt(n,10));
+        if(Math.abs(tx-cx)>LOAD_RADIUS+1 || Math.abs(ty-cy)>LOAD_RADIUS+1){
+            const grp = info.group;
+            scene.remove(grp);
+            grp.traverse(obj=>{
+                if(obj.geometry) obj.geometry.dispose();
+                if(obj.material) Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose();
+            });
+            loadedTiles.delete(key);
+        }
+    }
+}
+
+/* ===================== カメラ中心 ===================== */
+function cameraToLonLat(){
+    const tx = controls.target.x;
+    const tz = controls.target.z;
+    const m = { x: tx + ORIGIN_M.x, y: -(tz) + ORIGIN_M.y };
+    return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
+}
+
+/* ===================== Tile 更新ループ ===================== */
+let lastUpdate=0;
+const MIN_UPDATE_INTERVAL=1200;
+async function updateTilesAroundCamera(){
+    const now = performance.now();
+    if(now - lastUpdate < MIN_UPDATE_INTERVAL) return;
+    lastUpdate = now;
+
+    const center = cameraToLonLat();
+    const cx = lonToTileX(center.lon, ZOOM);
+    const cy = latToTileY(center.lat, ZOOM);
+
+    unloadFarTiles(cx, cy);
+
+    for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
+        for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
+            const tx=cx+dx, ty=cy+dy;
+            const key=`${tx}_${ty}`;
+            if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
+            enqueueFetch(async()=>{
+                const res = await fetchOverpassForTile(tx, ty, ZOOM);
+                if(res) addTileToScene(tx, ty, ZOOM, res);
+                return res;
+            });
+        }
+    }
 }
 
 /* ===================== ラベル関連 ===================== */
@@ -168,22 +248,24 @@ function addLabel(name, pos){
     currentLabel = sprite;
 }
 
-renderer.domElement.addEventListener('click', e=>{
+function onPointer(event){
     const rect = renderer.domElement.getBoundingClientRect();
-    mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
-    mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+    mouse.x = ((event.clientX-rect.left)/rect.width)*2-1;
+    mouse.y = -((event.clientY-rect.top)/rect.height)*2+1;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
     for(const i of intersects){
         if(i.object.userData && i.object.userData.name){
             const pos = i.object.position.clone(); 
             const geo = i.object.geometry.boundingBox;
-            pos.y += geo ? geo.max.y * 1.2 : 50; // 建物より少し上にラベル
+            pos.y += geo ? geo.max.y * 1.2 : 50;
             addLabel(i.object.userData.name, pos);
             break;
         }
     }
-});
+}
+renderer.domElement.addEventListener('click', onPointer);
+renderer.domElement.addEventListener('touchstart', e=>{ e.preventDefault(); onPointer(e.touches[0]); }, {passive:false});
 
 /* ===================== Animation ===================== */
 function animate(){
@@ -202,7 +284,6 @@ window.addEventListener('resize', ()=>{
     camera.updateProjectionMatrix();
 });
 
-processQueue();
 </script>
 </body>
 </html>
