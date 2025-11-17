@@ -56,7 +56,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xa8dffb);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 800, 1200);
+camera.position.set(0, 200, 300);
 
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.08;
@@ -195,7 +195,7 @@ function createExtrudeMeshFromWay(el){
     geo.translate(0, -centerY, 0);
 
     // 7) Material / Mesh
-    const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0xccccff });
+    const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0x999999 });//黒0xccccff
     const mesh = new THREE.Mesh(geo, mat);
 
     // 8) Place mesh so that it shares the same center handling as Box:
