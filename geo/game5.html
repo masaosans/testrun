@@ -1,373 +1,183 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>OSM 3D Viewer + TPS Player</title>
+<title>軽量TPSサンプル</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
-  #info{position:absolute;left:10px;top:10px;z-index:30;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
-  /* ジョイスティックUI */
-  #joyBase{
-    position:fixed; left:18px; bottom:18px; width:140px; height:140px;
-    border-radius:50%; background:rgba(0,0,0,0.12); z-index:40; touch-action:none;
-    display:flex; align-items:center; justify-content:center;
-    user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;
-  }
-  #joyKnob{
-    width:56px; height:56px; border-radius:50%; background:rgba(0,0,0,0.4);
-    transform:translate(0,0); transition: background .08s;
-    user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;
-  }
-  #camPad{
-    position:fixed; right:0; top:0; bottom:0; width:45%;
-    z-index:35; touch-action:none;
-  }
-  #jumpBtn{
-    position:fixed; right:18px; bottom:18px; width:72px; height:72px;
-    border-radius:50%; background:rgba(0,0,0,0.25); display:flex;
-    align-items:center; justify-content:center; z-index:40; touch-action:manipulation;
-    font-weight:bold; color:white; font-size:18px;
-    user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;
-  }
-  /* 小さなヘルプ表示 */
-  #hudSpeed { position:absolute; right:18px; top:18px; z-index:40; color:#111; background:rgba(255,255,255,0.8); padding:6px 8px; border-radius:6px; font-size:13px; }
+  #joyBase{position:fixed; left:18px; bottom:18px; width:140px; height:140px; border-radius:50%; background:rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; touch-action:none; z-index:40; user-select:none;}
+  #joyKnob{width:56px; height:56px; border-radius:50%; background:rgba(0,0,0,0.4); transform:translate(0,0); transition: background .08s; user-select:none;}
+  #camPad{position:fixed; right:0; top:0; bottom:0; width:50%; z-index:35; touch-action:none;}
+  #jumpBtn{position:fixed; right:18px; bottom:18px; width:72px; height:72px; border-radius:50%; background:rgba(0,0,0,0.25); display:flex; align-items:center; justify-content:center; z-index:40; font-weight:bold; color:white; font-size:18px; touch-action:none; user-select:none;}
+  #hudSpeed{position:absolute; right:18px; top:18px; z-index:40; color:#111; background:rgba(255,255,255,0.8); padding:6px 8px; border-radius:6px; font-size:13px;}
 </style>
 </head>
 <body>
-<div id="info">ドラッグで移動 / ホイールでズーム。左スティックで移動、右ドラッグで視点、ジャンプボタン</div>
 
-<!-- UI 要素 -->
 <div id="joyBase"><div id="joyKnob"></div></div>
 <div id="camPad"></div>
 <div id="jumpBtn">JUMP</div>
 <div id="hudSpeed"></div>
 
-<!-- three.js -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <script>
-/* ===================== 既存地図コード（短コメント版） ===================== */
-/* 基本設定 */
-const ZOOM = 16;
-let LOAD_RADIUS = 1;
-const MAX_CONCURRENT_FETCH = 3;
-const OVERPASS_RETRY = 2;
-const OVERPASS_DELAY_MS = 300;
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// ======== 基本設定 ========
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa8dffb);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 2000);
+camera.position.set(0,50,100);
 
-/* WebMercator */
-const R = 6378137;
-function deg2rad(d){return d*Math.PI/180;}
-function rad2deg(r){return r*180/Math.PI;}
-function lonToMercX(lon){return R*deg2rad(lon);}
-function latToMercY(lat){return R*Math.log(Math.tan(Math.PI/4+deg2rad(lat)/2));}
-function mercXToLon(x){return rad2deg(x/R);}
-function mercYToLat(y){return rad2deg(2*Math.atan(Math.exp(y/R))-Math.PI/2);}
-function lonLatToMerc(lon,lat){return {x:lonToMercX(lon), y:latToMercY(lat)};}
-function tile2lon(x,z){return x/2**z*360-180;}
-function tile2lat(y,z){const n=Math.PI-2*Math.PI*y/2**z; return rad2deg(Math.atan(Math.sinh(n))); }
-function lonToTileX(lon,z){return Math.floor((lon+180)/360*2**z);}
-function latToTileY(lat,z){const a=Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180)); return Math.floor((1-a/Math.PI)/2*2**z);}
-
-/* Origin */
-const INIT_CENTER_LON = 139.6917;
-const INIT_CENTER_LAT = 35.6895;
-const ORIGIN_M = lonLatToMerc(INIT_CENTER_LON, INIT_CENTER_LAT);
-
-/* Three.js init */
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xa8dffb);
-
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0,200,300);
-
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; controls.dampingFactor = 0.08;
-
 scene.add(new THREE.AmbientLight(0xffffff,0.6));
 const dir = new THREE.DirectionalLight(0xffffff,0.9);
-dir.position.set(500,1000,500);
+dir.position.set(100,200,100);
 scene.add(dir);
 
-/* キャッシュ */
-const loadedTiles = new Map();
-const fetchQueue = [];
-let activeFetches = 0;
-const geoCache = new Map();
-const imgCache = new Map();
-const windowTex = new THREE.TextureLoader().load("https://i.imgur.com/4NJx7G9.png");
-
-/* bbox / Overpass */
-function tileBBoxLonLat(x,y,z){return { west:tile2lon(x,z), north:tile2lat(y,z), east:tile2lon(x+1,z), south:tile2lat(y+1,z) }; }
-function bboxToOverpassQuery(b){ return `[out:json][timeout:25];(way["building"](${b.south},${b.west},${b.north},${b.east}););(._;>;);out geom;`; }
-
-/* fetch queue */
-async function fetchOverpassForTile(x,y,z,tries=0){
-  const key=`${x}_${y}`;
-  if(geoCache.has(key)) return geoCache.get(key);
-  const bbox = tileBBoxLonLat(x,y,z); const query = bboxToOverpassQuery(bbox);
-  try{ activeFetches++; const res = await fetch(OVERPASS_URL,{method:"POST", body:query}); if(!res.ok) throw new Error(`HTTP ${res.status}`); const json = await res.json(); const data = {bbox,json}; geoCache.set(key,data); return data; }
-  catch(err){ if(tries < OVERPASS_RETRY){ await new Promise(r=>setTimeout(r,500*Math.pow(2,tries))); return fetchOverpassForTile(x,y,z,tries+1); } else return null; } finally{ activeFetches--; }
-}
-function enqueueFetch(fn){ return new Promise(resolve=>{ fetchQueue.push({fn,resolve}); processQueue(); }); }
-function processQueue(){ if(activeFetches>=MAX_CONCURRENT_FETCH) return; const job = fetchQueue.shift(); if(!job) return; job.fn().then(r=>job.resolve(r)).finally(()=>setTimeout(processQueue, OVERPASS_DELAY_MS)); }
-
-/* 床タイル */
-function addFloorMeshToGroup(tex,bbox,group){
-  const westMx = lonToMercX(bbox.west), eastMx = lonToMercX(bbox.east);
-  const northMy = latToMercY(bbox.north), southMy = latToMercY(bbox.south);
-  const mercW = eastMx - westMx, mercH = northMy - southMy;
-  const centerX = (westMx + eastMx)/2 - ORIGIN_M.x;
-  const centerZ = -((southMy + northMy)/2 - ORIGIN_M.y);
-  const plane = new THREE.Mesh(new THREE.PlaneGeometry(mercW,mercH),new THREE.MeshPhongMaterial({ map:tex, side:THREE.DoubleSide }));
-  plane.rotation.x = -Math.PI/2; plane.position.set(centerX,0,centerZ); group.add(plane);
-}
-
-/* 建物座標変換 */
-function mercToWorld(mx,my){return { x: mx - ORIGIN_M.x, z: -(my - ORIGIN_M.y) };}
-
-/* Extrude 建物（位置修正済） */
-function createExtrudeMeshFromWay(el){
-  if(!el || !el.geometry || !Array.isArray(el.geometry) || el.geometry.length<3) return null;
-  let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
-  const worldPts=[];
-  for(const pt of el.geometry){
-    const m = lonLatToMerc(pt.lon, pt.lat);
-    const w = mercToWorld(m.x, m.y);
-    worldPts.push(w);
-    if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
-    if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
-  }
-  if(worldPts.length<3) return null;
-  const cx=(minX+maxX)/2; const cz=(minZ+maxZ)/2;
-  const shape = new THREE.Shape();
-  for(let i=0;i<worldPts.length;i++){ const p=worldPts[i]; const lx=p.x-cx; const lz=p.z-cz; if(i===0) shape.moveTo(lx,lz); else shape.lineTo(lx,lz); }
-  const tags = el.tags||{}; let height = 10;
-  if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
-  else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
-  const geo = new THREE.ExtrudeGeometry(shape,{depth:height,bevelEnabled:false,curveSegments:1});
-  geo.rotateX(-Math.PI/2);
-  geo.computeBoundingBox();
-  const minY = geo.boundingBox.min.y; const maxY = geo.boundingBox.max.y; const centerY = (minY+maxY)/2;
-  geo.translate(0, -centerY, 0);
-  const mat = new THREE.MeshPhongMaterial({ map: windowTex, color:0xcccccc }); // 明るい灰色
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(cx, height/2, cz);
-  mesh.geometry.computeBoundingBox();
-  mesh.updateMatrixWorld();
-  return mesh;
-}
-
-/* Box LOD */
-function createBoxLODFromWay(el,height){
-  let minX=Infinity, minZ=Infinity, maxX=-Infinity, maxZ=-Infinity;
-  for(const pt of el.geometry){
-    const m = lonLatToMerc(pt.lon, pt.lat);
-    const w = mercToWorld(m.x, m.y);
-    if(w.x<minX) minX=w.x; if(w.x>maxX) maxX=w.x;
-    if(w.z<minZ) minZ=w.z; if(w.z>maxZ) maxZ=w.z;
-  }
-  const sx = Math.max(1,maxX-minX), sz = Math.max(1,maxZ-minZ);
-  const cx = (minX+maxX)/2; const cz = (minZ+maxZ)/2;
-  const geo = new THREE.BoxGeometry(sx,height,sz);
-  const mat = new THREE.MeshPhongMaterial({color:0xcccccc});
-  const box = new THREE.Mesh(geo, mat);
-  box.position.set(cx, height/2, cz);
-  box.geometry.computeBoundingBox();
-  box.updateMatrixWorld();
-  return box;
-}
-
-/* createBuildingLOD */
-function createBuildingLOD(el){
-  const tags = el.tags||{};
-  if(!tags.building) return null;
-  let height=10;
-  if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
-  else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
-  const lod = new THREE.LOD();
-  try{ const extrude = createExtrudeMeshFromWay(el); if(extrude) lod.addLevel(extrude,0); } catch(e){ console.warn("detail fail",e); }
-  const box1 = createBoxLODFromWay(el,Math.max(3,height*0.9));
-  const box2 = createBoxLODFromWay(el,Math.max(3,height*0.7));
-  if(box1) lod.addLevel(box1,500);
-  if(box2) lod.addLevel(box2,1000);
-  return lod;
-}
-
-/* addTileToScene */
-function addTileToScene(x,y,z,data){
-  const key = `${x}_${y}`;
-  if(loadedTiles.has(key)) return;
-  const group = new THREE.Group();
-  group.userData={x,y,z,bbox:data.bbox};
-  const tileUrl=`https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
-  if(imgCache.has(tileUrl)) addFloorMeshToGroup(imgCache.get(tileUrl), data.bbox, group);
-  else { new THREE.TextureLoader().load(tileUrl, tex=>{ tex.flipY=true; imgCache.set(tileUrl, tex); addFloorMeshToGroup(tex, data.bbox, group); }); }
-  const els = data.json.elements||[];
-  for(const el of els){
-    if(el.type!=="way"||!el.geometry) continue;
-    try{ const b=createBuildingLOD(el); if(b) group.add(b); } catch(e){ console.warn("building create err",e); }
-  }
-  scene.add(group);
-  loadedTiles.set(key,{group,lastUsed:Date.now(),bbox:data.bbox});
-}
-
-/* unloadFarTiles */
-function unloadFarTiles(cx,cy){
-  for(const [key,info] of Array.from(loadedTiles)){
-    const [tx,ty] = key.split("_").map(n=>parseInt(n,10));
-    if(Math.abs(tx-cx)>LOAD_RADIUS+1 || Math.abs(ty-cy)>LOAD_RADIUS+1){
-      const grp = info.group; scene.remove(grp);
-      grp.traverse(obj=>{ if(obj.geometry) obj.geometry.dispose(); if(obj.material) Array.isArray(obj.material)?obj.material.forEach(m=>m.dispose()):obj.material.dispose(); });
-      loadedTiles.delete(key);
-    }
-  }
-}
-
-/* cameraToLonLat */
-function cameraToLonLat(){
-  const tx = controls.target.x; const tz = controls.target.z;
-  const m = { x: tx + ORIGIN_M.x, y: -(tz) + ORIGIN_M.y };
-  return { lon: mercXToLon(m.x), lat: mercYToLat(m.y) };
-}
-
-/* updateTilesAroundCamera */
-let lastUpdate=0; const MIN_UPDATE_INTERVAL=1200;
-async function updateTilesAroundCamera(){
-  const now = performance.now(); if(now - lastUpdate < MIN_UPDATE_INTERVAL) return; lastUpdate = now;
-  const center = cameraToLonLat();
-  const cx = lonToTileX(center.lon, ZOOM);
-  const cy = latToTileY(center.lat, ZOOM);
-  unloadFarTiles(cx, cy);
-  for(let dx=-LOAD_RADIUS; dx<=LOAD_RADIUS; dx++){
-    for(let dy=-LOAD_RADIUS; dy<=LOAD_RADIUS; dy++){
-      const tx=cx+dx, ty=cy+dy; const key=`${tx}_${ty}`;
-      if(loadedTiles.has(key)){ loadedTiles.get(key).lastUsed=Date.now(); continue; }
-      enqueueFetch(async()=>{ const res = await fetchOverpassForTile(tx, ty, ZOOM); if(res) addTileToScene(tx, ty, ZOOM, res); return res; });
-    }
-  }
-}
-
-/* ===================== TPS プレイヤー設定 ===================== */
-const playerRadius = 6;
-const playerHeight = 18;
-const moveSpeed = 40;
-const jumpPower = 22;
-const gravity = -48;
-const cameraDistance = 30;
-
+// ======== プレイヤー設定 ========
 const player = {
-  pos: new THREE.Vector3(0, 500, 0),
+  pos: new THREE.Vector3(0,10,0),
   vel: new THREE.Vector3(0,0,0),
   onGround: false,
-  radius: playerRadius,
-  height: playerHeight,
-  mesh: null
+  radius: 3,
+  height:12,
+  mesh:null
 };
+const moveSpeed=20, jumpPower=12, gravity=-24;
+let cameraDistance=30;
 
+// ======== プレイヤーメッシュ ========
 function createPlayerMesh(){
-  const gRoot = new THREE.Group();
-  const bodyGeo = new THREE.BoxGeometry(8, 12, 6);
-  const bodyMat = new THREE.MeshPhongMaterial({color:0x3366cc});
-  const body = new THREE.Mesh(bodyGeo, bodyMat); body.position.set(0, (playerHeight/2 - 2), 0); gRoot.add(body);
-  const headGeo = new THREE.SphereGeometry(3.2, 8, 6);
-  const headMat = new THREE.MeshPhongMaterial({color:0xffdd99});
-  const head = new THREE.Mesh(headGeo, headMat); head.position.set(0, playerHeight - 3, 0); gRoot.add(head);
-  const limbGeo = new THREE.BoxGeometry(2,6,2);
-  const limbMat = new THREE.MeshPhongMaterial({color:0x333333});
-  const l1 = new THREE.Mesh(limbGeo, limbMat); l1.position.set(-3, playerHeight/2 - 6, 2); gRoot.add(l1);
-  const l2 = l1.clone(); l2.position.set(3, playerHeight/2 - 6, 2); gRoot.add(l2);
-  gRoot.traverse(n => { if(n.isMesh){ n.castShadow=true; n.receiveShadow=true; } });
-  return gRoot;
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4,8,3), new THREE.MeshPhongMaterial({color:0x3366cc}));
+  body.position.y = 4; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(2,8,6), new THREE.MeshPhongMaterial({color:0xffdd99}));
+  head.position.y = 10; g.add(head);
+  return g;
 }
-
 player.mesh = createPlayerMesh();
 scene.add(player.mesh);
 
-const hudSpeed = document.getElementById('hudSpeed');
+// ======== 床 ========
+const floorGeo = new THREE.PlaneGeometry(500,500);
+const floorMat = new THREE.MeshPhongMaterial({color:0x55aa55, side:THREE.DoubleSide});
+const floor = new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+scene.add(floor);
 
-/* ジョイスティック */
+// ======== 雲足場 ========
+const cloudY=50, cloudSize=40;
+const cloud = new THREE.Mesh(new THREE.PlaneGeometry(cloudSize,cloudSize), new THREE.MeshPhongMaterial({color:0xffffff, transparent:true, opacity:0.6, side:THREE.DoubleSide}));
+cloud.rotation.x=-Math.PI/2;
+cloud.position.set(0,cloudY,0);
+scene.add(cloud);
+
+// ======== 衝突判定 ========
+function getCloudAABB(mesh){
+  mesh.geometry.computeBoundingBox();
+  const bbox = mesh.geometry.boundingBox.clone();
+  bbox.applyMatrix4(mesh.matrixWorld);
+  return bbox;
+}
+const colliders = [getCloudAABB(cloud)];
+
+// ======== ジョイスティック ========
 const joyBase = document.getElementById('joyBase');
 const joyKnob = document.getElementById('joyKnob');
-let joyActive = false;
-let joyStart = {x:0,y:0};
-let joyVec = {x:0,y:0};
+let joyActive=false, joyStart={x:0,y:0}, joyVec={x:0,y:0};
+function getEventPoint(e){return e.touches?[{x:e.touches[0].clientX,y:e.touches[0].clientY}][0]:{x:e.clientX,y:e.clientY};}
+joyBase.addEventListener('pointerdown', e=>{joyActive=true; const p=getEventPoint(e); joyStart=p; joyKnob.style.transition='none'; e.preventDefault();});
+window.addEventListener('pointermove', e=>{ if(!joyActive) return; const p=getEventPoint(e); let dx=p.x-joyStart.x, dy=p.y-joyStart.y; const max=56; dx=Math.max(-max,Math.min(max,dx)); dy=Math.max(-max,Math.min(max,dy)); joyKnob.style.transform=`translate(${dx}px,${dy}px)`; joyVec.x=dx/max; joyVec.y=-dy/max; e.preventDefault(); });
+window.addEventListener('pointerup', e=>{joyActive=false; joyKnob.style.transition='transform .12s'; joyKnob.style.transform='translate(0px,0px)'; joyVec={x:0,y:0}; e.preventDefault();});
 
-function joyStartHandler(e){ e.preventDefault(); joyActive = true; const p = getPointerPos(e); joyStart=p; joyVec={x:0,y:0}; updateJoyKnob(); }
-function joyMoveHandler(e){ if(!joyActive) return; const p = getPointerPos(e); const dx=p.x-joyStart.x; const dy=p.y-joyStart.y; const maxR=56; let len=Math.sqrt(dx*dx+dy*dy); if(len>maxR){ const scale=maxR/len; joyVec={x:dx*scale,y:dy*scale}; }else joyVec={x:dx,y:dy}; updateJoyKnob(); }
-function joyEndHandler(e){ joyActive=false; joyVec={x:0,y:0}; updateJoyKnob(); }
-function getPointerPos(e){ if(e.touches && e.touches.length>0) return {x:e.touches[0].clientX,y:e.touches[0].clientY}; else return {x:e.clientX,y:e.clientY}; }
-function updateJoyKnob(){ joyKnob.style.transform=`translate(${joyVec.x}px, ${joyVec.y}px)`; }
-
-joyBase.addEventListener('pointerdown', joyStartHandler);
-joyBase.addEventListener('pointermove', joyMoveHandler);
-document.addEventListener('pointerup', joyEndHandler);
-
-/* ジャンプボタン */
-const jumpBtn = document.getElementById('jumpBtn');
-jumpBtn.addEventListener('pointerdown', (e)=>{
-  e.preventDefault(); // 選択防止
-  if(player.onGround){
-    player.vel.y = jumpPower;
-    player.onGround = false;
-  }
-});
-
-/* カメラ制御 */
-let camAngleX = 0, camAngleY = 0;
-let camTargetDistance = 30;
+// ======== カメラ回転 & ズーム ========
 const camPad = document.getElementById('camPad');
-let camDrag = false;
-let camStart={x:0,y:0};
-camPad.addEventListener('pointerdown', (e)=>{ camDrag=true; camStart=getPointerPos(e); e.preventDefault(); });
-camPad.addEventListener('pointermove', (e)=>{ if(!camDrag) return; const p=getPointerPos(e); camAngleX += (p.x-camStart.x)*0.005; camAngleY += (p.y-camStart.y)*0.003; camAngleY=Math.max(-0.4,Math.min(0.6,camAngleY)); camStart=p; });
-document.addEventListener('pointerup', ()=>{ camDrag=false; });
+let camRotActive=false, lastCamPoint=null, yaw=0, pitch=0.15;
+camPad.addEventListener('pointerdown', e=>{camRotActive=true; lastCamPoint={x:e.clientX,y:e.clientY}; e.preventDefault();});
+window.addEventListener('pointermove', e=>{if(!camRotActive) return; const dx=e.clientX-lastCamPoint.x, dy=e.clientY-lastCamPoint.y; lastCamPoint={x:e.clientX,y:e.clientY}; const sens=0.004; yaw-=dx*sens; pitch-=dy*sens; const maxPitch=0.6; const minPitch=-0.4; pitch=Math.max(minPitch,Math.min(maxPitch,pitch)); e.preventDefault();});
+window.addEventListener('pointerup', e=>{camRotActive=false; e.preventDefault();});
+window.addEventListener('wheel', e=>{cameraDistance -= e.deltaY*0.05; cameraDistance=Math.max(15,Math.min(60,cameraDistance)); e.preventDefault();});
 
-document.addEventListener('wheel', e=>{
-  camTargetDistance -= e.deltaY*0.05;
-  camTargetDistance = Math.max(15, Math.min(60, camTargetDistance));
+// ======== ジャンプ ========
+const jumpBtn=document.getElementById('jumpBtn');
+jumpBtn.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(player.onGround){player.vel.y=jumpPower; player.onGround=false;}
 });
 
-/* アニメーション */
-const clock = new THREE.Clock();
+// ======== キーボード ========
+const keyState={};
+window.addEventListener('keydown', e=>{keyState[e.key.toLowerCase()]=true;});
+window.addEventListener('keyup', e=>{keyState[e.key.toLowerCase()]=false;});
+
+// ======== 衝突判定（簡易） ========
+function resolveCollisions(pos,radius,height,boxes){
+  const bottom=new THREE.Vector3(pos.x,pos.y-radius,pos.z);
+  const push=new THREE.Vector3();
+  for(const b of boxes){
+    const cl=new THREE.Vector3(Math.max(b.min.x,Math.min(b.max.x,bottom.x)), Math.max(b.min.y,Math.min(b.max.y,bottom.y)), Math.max(b.min.z,Math.min(b.max.z,bottom.z)));
+    if(cl.distanceToSquared(bottom)<radius*radius){ const dir=bottom.clone().sub(cl).normalize(); push.add(dir.multiplyScalar(radius-Math.sqrt(cl.distanceToSquared(bottom)))); }
+  }
+  pos.add(push);
+}
+
+// ======== 地面判定 ========
+function groundCheck(pos){ return pos.y-player.height/2<=0?{onGround:true,groundY:player.height/2}:{onGround:false,groundY:null};}
+
+// ======== アニメーション ========
+let lastTime=performance.now();
 function animate(){
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
-  // 移動
-  const moveVec = new THREE.Vector3(joyVec.x,0,joyVec.y);
-  if(moveVec.lengthSq()>0.01){
-    moveVec.normalize();
-    const angle = Math.atan2(moveVec.x, moveVec.z) + camAngleX;
-    player.pos.x += Math.sin(angle)*moveSpeed*dt;
-    player.pos.z += Math.cos(angle)*moveSpeed*dt;
-  }
+  const now=performance.now();
+  let dt=(now-lastTime)/1000; if(dt>0.1) dt=0.1; lastTime=now;
+
+  // 入力
+  let inX=joyVec.x, inY=joyVec.y;
+  if(keyState['w']) inY=1; if(keyState['s']) inY=-1;
+  if(keyState['a']) inX=-1; if(keyState['d']) inX=1;
+
+  const camForward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const camRight=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),camForward).normalize();
+  const move=new THREE.Vector3();
+  move.addScaledVector(camForward,inY);
+  move.addScaledVector(camRight,inX);
+  if(move.lengthSq()>1) move.normalize();
+  move.multiplyScalar(moveSpeed*dt);
+  player.pos.add(move);
+
   // 重力
-  player.vel.y += gravity*dt;
-  player.pos.y += player.vel.y;
-  if(player.pos.y<=0){ player.pos.y=0; player.vel.y=0; player.onGround=true; }
-  player.mesh.position.copy(player.pos);
+  player.vel.y+=gravity*dt;
+  player.pos.y+=player.vel.y*dt;
 
-  // カメラ
-  const camOffset = new THREE.Vector3(
-    Math.sin(camAngleX)*Math.cos(camAngleY),
-    Math.sin(camAngleY),
-    Math.cos(camAngleX)*Math.cos(camAngleY)
-  ).multiplyScalar(camTargetDistance);
-  camera.position.copy(player.pos).add(camOffset);
-  camera.lookAt(player.pos);
+  // 地面
+  const g=groundCheck(player.pos);
+  if(g.onGround && player.vel.y<=0){ player.onGround=true; player.vel.y=0; player.pos.y=g.groundY;} else player.onGround=false;
 
-  controls.update();
-  updateTilesAroundCamera();
-  renderer.render(scene, camera);
-  hudSpeed.innerText = `x:${player.pos.x.toFixed(1)}, y:${player.pos.y.toFixed(1)}, z:${player.pos.z.toFixed(1)}`;
+  // 衝突
+  resolveCollisions(player.pos,player.radius,player.height,colliders);
+
+  // メッシュ追従
+  player.mesh.position.set(player.pos.x,player.pos.y,player.pos.z);
+
+  // カメラTPS
+  const target=new THREE.Vector3(player.pos.x,player.pos.y+player.height*0.5,player.pos.z);
+  const offset=new THREE.Vector3(Math.sin(yaw)*cameraDistance, cameraDistance*Math.sin(pitch), Math.cos(yaw)*cameraDistance);
+  const camPos=new THREE.Vector3(target.x-offset.x, target.y+offset.y, target.z-offset.z);
+  camera.position.lerp(camPos,0.1);
+  camera.lookAt(target);
+
+  // HUD
+  document.getElementById('hudSpeed').textContent=`spd ${(player.vel.length()).toFixed(1)}`;
+
+  renderer.render(scene,camera);
 }
 animate();
+
+window.addEventListener('resize', ()=>{renderer.setSize(window.innerWidth,window.innerHeight); camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();});
 </script>
 </body>
 </html>
