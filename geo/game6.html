@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>TPSサンプル - 街マップ + ポリゴンキャラ</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<style>
+  body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
+  #joyBase{position:fixed; left:18px; bottom:18px; width:140px; height:140px; border-radius:50%; background:rgba(0,0,0,0.12); display:flex; align-items:center; justify-content:center; touch-action:none; z-index:40; user-select:none;}
+  #joyKnob{width:56px; height:56px; border-radius:50%; background:rgba(0,0,0,0.4); transform:translate(0,0); transition: background .08s; user-select:none;}
+  #camPad{position:fixed; right:0; top:0; bottom:0; width:50%; z-index:35; touch-action:none;}
+  #jumpBtn,#dashBtn{
+    position:fixed; width:72px; height:72px; border-radius:50%;
+    background:rgba(0,0,0,0.25); display:flex; align-items:center; justify-content:center;
+    z-index:40; font-weight:bold; color:white; font-size:18px; touch-action:none; user-select:none;
+  }
+  #jumpBtn{right:18px; bottom:18px;}
+  #dashBtn{right:18px; bottom:100px;}
+  #hudSpeed{position:absolute; right:18px; top:18px; z-index:40; color:#111; background:rgba(255,255,255,0.8); padding:6px 8px; border-radius:6px; font-size:13px;}
+</style>
+</head>
+<body>
+
+<div id="joyBase"><div id="joyKnob"></div></div>
+<div id="camPad"></div>
+<div id="jumpBtn">JUMP</div>
+<div id="dashBtn">DASH</div>
+<div id="hudSpeed"></div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.128.0/build/three.module.js';
+import { GLTFLoader } from 'https://unpkg.com/three@0.128.0/examples/jsm/loaders/GLTFLoader.js';
+
+// ======== 基本設定 ========
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa8dffb);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 2000);
+camera.position.set(0,50,100);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const dir = new THREE.DirectionalLight(0xffffff,0.9);
+dir.position.set(100,200,100);
+scene.add(dir);
+
+// ======== プレイヤー設定 ========
+const player = {
+  pos: new THREE.Vector3(0,6,0),
+  vel: new THREE.Vector3(0,0,0),
+  onGround: false,
+  radius: 3,
+  height:12,
+  mesh:null,
+  mixer:null,
+  walkAction:null
+};
+const moveSpeed=20, jumpPower=36, gravity=-24; // ジャンプは3倍
+let cameraDistance=30;
+let dashActive=false;
+
+// ======== 床 ========
+const floorGeo = new THREE.PlaneGeometry(500,500);
+const floorMat = new THREE.MeshPhongMaterial({color:0x55aa55, side:THREE.DoubleSide});
+const floor = new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+scene.add(floor);
+
+// ======== 街マップ（建物） ========
+const buildings = [];
+const colliders = [];
+
+function createBuilding(x,z,w,h,d,color){
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mat = new THREE.MeshPhongMaterial({color: color || 0x888888});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.set(x,h/2,z);
+  scene.add(mesh);
+  buildings.push(mesh);
+  geo.computeBoundingBox();
+  const bbox = geo.boundingBox.clone();
+  bbox.applyMatrix4(mesh.matrixWorld);
+  colliders.push(bbox);
+}
+
+// 街の建物
+createBuilding(-30, -30, 20, 20, 20, 0xaa4444);
+createBuilding(40, -20, 15, 30, 15, 0x44aa44);
+createBuilding(-10, 40, 25, 25, 25, 0x4444aa);
+createBuilding(30, 30, 20, 15, 20, 0xaa8844);
+createBuilding(0, 0, 10, 40, 10, 0x44aaff);
+
+// ======== GLTF キャラクター読み込み ========
+const loader = new GLTFLoader();
+loader.load('character.glb', gltf=>{
+  const model = gltf.scene;
+  scene.add(model);
+  player.mesh = model;
+
+  player.mixer = new THREE.AnimationMixer(model);
+  const walkClip = THREE.AnimationClip.findByName(gltf.animations,'Walk');
+  if(walkClip){
+    player.walkAction = player.mixer.clipAction(walkClip);
+    player.walkAction.play();
+    player.walkAction.setEffectiveWeight(0);
+  }
+});
+
+// ======== ジョイスティック ========
+const joyBase = document.getElementById('joyBase');
+const joyKnob = document.getElementById('joyKnob');
+let joyActive=false, joyStart={x:0,y:0}, joyVec={x:0,y:0}, joyPointerId=null;
+
+function getEventPoint(e){return e.touches?[{x:e.touches[0].clientX,y:e.touches[0].clientY}][0]:{x:e.clientX,y:e.clientY};}
+
+joyBase.addEventListener('pointerdown', e=>{
+  if(joyActive) return;
+  joyActive=true;
+  joyPointerId = e.pointerId;
+  const p=getEventPoint(e);
+  joyStart=p;
+  joyKnob.style.transition='none';
+  e.preventDefault();
+});
+
+window.addEventListener('pointermove', e=>{
+  if(!joyActive || e.pointerId !== joyPointerId) return;
+  const p=getEventPoint(e);
+  let dx=p.x-joyStart.x, dy=p.y-joyStart.y;
+  const max=56;
+  dx=Math.max(-max,Math.min(max,dx));
+  dy=Math.max(-max,Math.min(max,dy));
+  joyKnob.style.transform=`translate(${dx}px,${dy}px)`;
+  joyVec.x=-dx/max; // ← 左右逆に変更
+  joyVec.y=-dy/max;
+  e.preventDefault();
+});
+
+window.addEventListener('pointerup', e=>{
+  if(e.pointerId !== joyPointerId) return;
+  joyActive=false; joyPointerId=null;
+  joyKnob.style.transition='transform .12s';
+  joyKnob.style.transform='translate(0px,0px)';
+  joyVec={x:0,y:0};
+  e.preventDefault();
+});
+
+// ======== ジャンプボタン ========
+const jumpBtn=document.getElementById('jumpBtn');
+jumpBtn.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(player.onGround){player.vel.y=jumpPower; player.onGround=false;}
+});
+
+// ======== ダッシュボタン ========
+const dashBtn=document.getElementById('dashBtn');
+dashBtn.addEventListener('pointerdown', e=>{dashActive=true; e.preventDefault();});
+dashBtn.addEventListener('pointerup', e=>{dashActive=false; e.preventDefault();});
+
+// ======== カメラ回転 & ズーム ========
+const camPad = document.getElementById('camPad');
+let camRotActive=false, lastCamPoint=null, yaw=0, pitch=0.15;
+camPad.addEventListener('pointerdown', e=>{camRotActive=true; lastCamPoint={x:e.clientX,y:e.clientY}; e.preventDefault();});
+window.addEventListener('pointermove', e=>{
+  if(!camRotActive) return;
+  const dx=e.clientX-lastCamPoint.x, dy=e.clientY-lastCamPoint.y;
+  lastCamPoint={x:e.clientX,y:e.clientY};
+  const sens=0.004;
+  yaw-=dx*sens; pitch-=dy*sens;
+  pitch=Math.max(-0.4,Math.min(0.6,pitch));
+  e.preventDefault();
+});
+window.addEventListener('pointerup', e=>{camRotActive=false; e.preventDefault();});
+window.addEventListener('wheel', e=>{cameraDistance -= e.deltaY*0.05; cameraDistance=Math.max(15,Math.min(60,cameraDistance)); e.preventDefault();});
+
+// ======== 衝突判定・地面判定 ========
+function resolveCollisions(pos,radius,height,boxes){
+  const bottom=new THREE.Vector3(pos.x,pos.y-radius,pos.z);
+  const push=new THREE.Vector3();
+  for(const b of boxes){
+    const cl=new THREE.Vector3(Math.max(b.min.x,Math.min(b.max.x,bottom.x)), Math.max(b.min.y,Math.min(b.max.y,bottom.y)), Math.max(b.min.z,Math.min(b.max.z,bottom.z)));
+    if(cl.distanceToSquared(bottom)<radius*radius){ 
+      const dir=bottom.clone().sub(cl).normalize(); 
+      push.add(dir.multiplyScalar(radius-Math.sqrt(cl.distanceToSquared(bottom)))); 
+    }
+  }
+  pos.add(push);
+}
+function groundCheck(pos){ return pos.y-player.height/2<=0?{onGround:true,groundY:player.height/2}:{onGround:false,groundY:null};}
+
+// ======== アニメーション ========
+let lastTime=performance.now();
+function animate(){
+  requestAnimationFrame(animate);
+  const now = performance.now();
+  let dt = (now-lastTime)/1000;
+  if(dt>0.1) dt=0.1;
+  lastTime=now;
+
+  let inX=joyVec.x, inY=joyVec.y;
+  if(dashActive){ inX*=3; inY*=3; }
+
+  const camForward=new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const camRight=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),camForward).normalize();
+  const moveVec=new THREE.Vector3();
+  moveVec.addScaledVector(camForward,inY);
+  moveVec.addScaledVector(camRight,inX);
+  if(moveVec.lengthSq()>1) moveVec.normalize();
+  moveVec.multiplyScalar(moveSpeed*dt);
+  player.pos.add(moveVec);
+
+  player.vel.y += gravity*dt;
+  player.pos.y += player.vel.y*dt;
+
+  const g = groundCheck(player.pos);
+  if(g.onGround && player.vel.y<=0){player.onGround=true; player.vel.y=0; player.pos.y=g.groundY;} else player.onGround=false;
+
+  resolveCollisions(player.pos,player.radius,player.height,colliders);
+
+  if(player.mesh){
+    player.mesh.position.set(player.pos.x,player.pos.y,player.pos.z);
+
+    // 歩行アニメーション速度調整
+    if(player.walkAction){
+      const speed = moveVec.length();
+      if(speed>0.01){
+        player.walkAction.setEffectiveWeight(1);
+        player.walkAction.setEffectiveTimeScale(speed*3); // スピードに応じて歩き
+      } else {
+        player.walkAction.setEffectiveWeight(0);
+      }
+      if(player.mixer) player.mixer.update(dt);
+    }
+  }
+
+  const target=new THREE.Vector3(player.pos.x,player.pos.y+player.height*0.5,player.pos.z);
+  const offset=new THREE.Vector3(Math.sin(yaw)*cameraDistance, cameraDistance*Math.sin(pitch), Math.cos(yaw)*cameraDistance);
+  const camPos=new THREE.Vector3(target.x-offset.x, target.y+offset.y, target.z-offset.z);
+  camera.position.lerp(camPos,0.1);
+  camera.lookAt(target);
+
+  document.getElementById('hudSpeed').textContent=`spd ${(player.vel.length()).toFixed(1)}`;
+  renderer.render(scene,camera);
+}
+
+animate();
+window.addEventListener('resize', ()=>{renderer.setSize(window.innerWidth,window.innerHeight); camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();});
+</script>
+
+</body>
+</html>
