@@ -85,36 +85,78 @@ function getCloudAABB(mesh){
 }
 const colliders = [getCloudAABB(cloud)];
 
-// ======== ジョイスティック ========
+// ======== ジョイスティック (マルチタッチ対応) ========
 const joyBase = document.getElementById('joyBase');
 const joyKnob = document.getElementById('joyKnob');
-let joyActive=false, joyStart={x:0,y:0}, joyVec={x:0,y:0};
+let joyActive=false, joyStart={x:0,y:0}, joyVec={x:0,y:0}, joyPointerId=null;
+
 function getEventPoint(e){return e.touches?[{x:e.touches[0].clientX,y:e.touches[0].clientY}][0]:{x:e.clientX,y:e.clientY};}
-joyBase.addEventListener('pointerdown', e=>{joyActive=true; const p=getEventPoint(e); joyStart=p; joyKnob.style.transition='none'; e.preventDefault();});
-window.addEventListener('pointermove', e=>{ if(!joyActive) return; const p=getEventPoint(e); let dx=p.x-joyStart.x, dy=p.y-joyStart.y; const max=56; dx=Math.max(-max,Math.min(max,dx)); dy=Math.max(-max,Math.min(max,dy)); joyKnob.style.transform=`translate(${dx}px,${dy}px)`; joyVec.x=dx/max; joyVec.y=-dy/max; e.preventDefault(); });
-window.addEventListener('pointerup', e=>{joyActive=false; joyKnob.style.transition='transform .12s'; joyKnob.style.transform='translate(0px,0px)'; joyVec={x:0,y:0}; e.preventDefault();});
+
+joyBase.addEventListener('pointerdown', e=>{
+  if(joyActive) return; // 既に操作中なら無視
+  joyActive=true;
+  joyPointerId = e.pointerId;
+  const p=getEventPoint(e);
+  joyStart=p;
+  joyKnob.style.transition='none';
+  e.preventDefault();
+});
+
+window.addEventListener('pointermove', e=>{
+  if(!joyActive || e.pointerId !== joyPointerId) return; // 自分の指以外は無視
+  const p=getEventPoint(e);
+  let dx=p.x-joyStart.x, dy=p.y-joyStart.y;
+  const max=56;
+  dx=Math.max(-max,Math.min(max,dx));
+  dy=Math.max(-max,Math.min(max,dy));
+  joyKnob.style.transform=`translate(${dx}px,${dy}px)`;
+  joyVec.x=dx/max;
+  joyVec.y=-dy/max;
+  e.preventDefault();
+});
+
+window.addEventListener('pointerup', e=>{
+  if(e.pointerId !== joyPointerId) return;
+  joyActive=false; joyPointerId=null;
+  joyKnob.style.transition='transform .12s';
+  joyKnob.style.transform='translate(0px,0px)';
+  joyVec={x:0,y:0};
+  e.preventDefault();
+});
+
+// ======== ジャンプボタン (マルチタッチ対応) ========
+const jumpBtn=document.getElementById('jumpBtn');
+jumpBtn.addEventListener('pointerdown', e=>{
+  e.preventDefault(); // 選択防止
+  if(player.onGround){player.vel.y=jumpPower; player.onGround=false;}
+});
+jumpBtn.addEventListener('pointermove', e=>e.preventDefault());
+jumpBtn.addEventListener('pointerup', e=>e.preventDefault());
 
 // ======== カメラ回転 & ズーム ========
 const camPad = document.getElementById('camPad');
 let camRotActive=false, lastCamPoint=null, yaw=0, pitch=0.15;
 camPad.addEventListener('pointerdown', e=>{camRotActive=true; lastCamPoint={x:e.clientX,y:e.clientY}; e.preventDefault();});
-window.addEventListener('pointermove', e=>{if(!camRotActive) return; const dx=e.clientX-lastCamPoint.x, dy=e.clientY-lastCamPoint.y; lastCamPoint={x:e.clientX,y:e.clientY}; const sens=0.004; yaw-=dx*sens; pitch-=dy*sens; const maxPitch=0.6; const minPitch=-0.4; pitch=Math.max(minPitch,Math.min(maxPitch,pitch)); e.preventDefault();});
+window.addEventListener('pointermove', e=>{
+  if(!camRotActive) return;
+  const dx=e.clientX-lastCamPoint.x, dy=e.clientY-lastCamPoint.y;
+  lastCamPoint={x:e.clientX,y:e.clientY};
+  const sens=0.004;
+  yaw-=dx*sens;
+  pitch-=dy*sens;
+  const maxPitch=0.6; const minPitch=-0.4;
+  pitch=Math.max(minPitch,Math.min(maxPitch,pitch));
+  e.preventDefault();
+});
 window.addEventListener('pointerup', e=>{camRotActive=false; e.preventDefault();});
 window.addEventListener('wheel', e=>{cameraDistance -= e.deltaY*0.05; cameraDistance=Math.max(15,Math.min(60,cameraDistance)); e.preventDefault();});
-
-// ======== ジャンプ ========
-const jumpBtn=document.getElementById('jumpBtn');
-jumpBtn.addEventListener('pointerdown', e=>{
-  e.preventDefault();
-  if(player.onGround){player.vel.y=jumpPower; player.onGround=false;}
-});
 
 // ======== キーボード ========
 const keyState={};
 window.addEventListener('keydown', e=>{keyState[e.key.toLowerCase()]=true;});
 window.addEventListener('keyup', e=>{keyState[e.key.toLowerCase()]=false;});
 
-// ======== 衝突判定（簡易） ========
+// ======== 衝突判定・地面判定 ========
 function resolveCollisions(pos,radius,height,boxes){
   const bottom=new THREE.Vector3(pos.x,pos.y-radius,pos.z);
   const push=new THREE.Vector3();
@@ -124,8 +166,6 @@ function resolveCollisions(pos,radius,height,boxes){
   }
   pos.add(push);
 }
-
-// ======== 地面判定 ========
 function groundCheck(pos){ return pos.y-player.height/2<=0?{onGround:true,groundY:player.height/2}:{onGround:false,groundY:null};}
 
 // ======== アニメーション ========
@@ -135,7 +175,6 @@ function animate(){
   const now=performance.now();
   let dt=(now-lastTime)/1000; if(dt>0.1) dt=0.1; lastTime=now;
 
-  // 入力
   let inX=joyVec.x, inY=joyVec.y;
   if(keyState['w']) inY=1; if(keyState['s']) inY=-1;
   if(keyState['a']) inX=-1; if(keyState['d']) inX=1;
@@ -149,30 +188,22 @@ function animate(){
   move.multiplyScalar(moveSpeed*dt);
   player.pos.add(move);
 
-  // 重力
   player.vel.y+=gravity*dt;
   player.pos.y+=player.vel.y*dt;
 
-  // 地面
   const g=groundCheck(player.pos);
   if(g.onGround && player.vel.y<=0){ player.onGround=true; player.vel.y=0; player.pos.y=g.groundY;} else player.onGround=false;
 
-  // 衝突
   resolveCollisions(player.pos,player.radius,player.height,colliders);
-
-  // メッシュ追従
   player.mesh.position.set(player.pos.x,player.pos.y,player.pos.z);
 
-  // カメラTPS
   const target=new THREE.Vector3(player.pos.x,player.pos.y+player.height*0.5,player.pos.z);
   const offset=new THREE.Vector3(Math.sin(yaw)*cameraDistance, cameraDistance*Math.sin(pitch), Math.cos(yaw)*cameraDistance);
   const camPos=new THREE.Vector3(target.x-offset.x, target.y+offset.y, target.z-offset.z);
   camera.position.lerp(camPos,0.1);
   camera.lookAt(target);
 
-  // HUD
   document.getElementById('hudSpeed').textContent=`spd ${(player.vel.length()).toFixed(1)}`;
-
   renderer.render(scene,camera);
 }
 animate();
