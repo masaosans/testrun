@@ -415,6 +415,9 @@ function collectBuildingAABBs(){
       }
     });
   }
+  // 雲の足場追加
+  boxes.push(getCloudAABB(cloudMesh));
+
   return boxes;
 }
 
@@ -584,8 +587,26 @@ window.addEventListener('keydown', e=>{
   if(e.key=='-'){ LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1); }
 });
 
-/* ===================== 初期位置設定（高い位置から降下） ===================== */
-/* カメラターゲットはプレイヤー位置に合わせる */
+/* ===================== 雲の足場作成 ===================== */
+const cloudY = 500; // 上空500m
+const cloudSize = 80; // 足場の幅・奥行き
+const cloudGeo = new THREE.PlaneGeometry(cloudSize, cloudSize);
+const cloudMat = new THREE.MeshPhongMaterial({color:0xffffff, transparent:true, opacity:0.6, side:THREE.DoubleSide});
+const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+cloudMesh.rotation.x = -Math.PI/2;
+cloudMesh.position.set(0, cloudY, 0);
+scene.add(cloudMesh);
+
+/* 足場を簡易AABBとして衝突判定に追加する関数 */
+function getCloudAABB(mesh){
+  mesh.geometry.computeBoundingBox();
+  const bbox = mesh.geometry.boundingBox.clone();
+  bbox.applyMatrix4(mesh.matrixWorld);
+  return bbox;
+}
+
+/* ===================== プレイヤー初期化 ===================== */
+player.pos.set(0, cloudY + playerHeight/2, 0); // 足場の上に配置
 controls.target.set(player.pos.x, player.pos.y, player.pos.z);
 
 /* ===================== 最後にタイル読み込みプロセスを開始 ===================== */
