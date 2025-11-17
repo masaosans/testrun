@@ -243,8 +243,8 @@ function createBuildingLOD(el){
     } catch(e){ console.warn("detail fail",e); }
     const box1 = createBoxLODFromWay(el,Math.max(3,height*0.9));
     const box2 = createBoxLODFromWay(el,Math.max(3,height*0.7));
-    if(box1) lod.addLevel(box1,500);
-    if(box2) lod.addLevel(box2,1000);
+    if(box1) lod.addLevel(box1,1000);
+    if(box2) lod.addLevel(box2,1500);
     return lod;
 }
 
