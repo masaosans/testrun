@@ -125,7 +125,7 @@ scene.background = new THREE.Color(0xa8dffb); // 空色背景
 
 // カメラ作成
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 1, 20000);
-camera.position.set(0, 200, 300);
+camera.position.set(0, 400, 600);
 
 // マウス操作（OrbitControls）
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -251,7 +251,6 @@ function addFloorMeshToGroup(tex, bbox, group){
       タイルの経度緯度範囲をメルカトル→ワールド座標に変換し
       1枚の Plane として描画
     */
-
     const westMx = lonToMercX(bbox.west);
     const eastMx = lonToMercX(bbox.east);
     const northMy = latToMercY(bbox.north);
@@ -359,7 +358,24 @@ function createExtrudeMeshFromWay(el){
         color:0x999999
     });
 
-    const mesh = new THREE.Mesh(geo, mat);
+    //追加
+    const wallMaterial = new THREE.MeshStandardMaterial({
+        color: 0xcccccc, // 明るい壁色
+        roughness: 0.9,
+        metalness: 0.0
+    });
+
+    const roofMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe0e0e0, // 明るい屋根色
+        roughness: 0.9,
+        metalness: 0.0
+    });
+    
+    //const mesh = new THREE.Mesh(geo, mat);
+　  const mesh = new THREE.Mesh(geo, [wallMaterial, roofMaterial]);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
 
     // BoxLOD と同じ配置になるよう高さ/2 を足す
     mesh.position.set(cx, height/2, cz);
