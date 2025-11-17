@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>軽量TPSサンプル</title>
+<title>軽量TPSサンプル - 街マップ</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
@@ -40,7 +40,7 @@ scene.add(dir);
 
 // ======== プレイヤー設定 ========
 const player = {
-  pos: new THREE.Vector3(0,10,0),
+  pos: new THREE.Vector3(0,6,0), // 地面上スタート
   vel: new THREE.Vector3(0,0,0),
   onGround: false,
   radius: 3,
@@ -69,21 +69,30 @@ const floor = new THREE.Mesh(floorGeo,floorMat);
 floor.rotation.x=-Math.PI/2;
 scene.add(floor);
 
-// ======== 雲足場 ========
-const cloudY=50, cloudSize=40;
-const cloud = new THREE.Mesh(new THREE.PlaneGeometry(cloudSize,cloudSize), new THREE.MeshPhongMaterial({color:0xffffff, transparent:true, opacity:0.6, side:THREE.DoubleSide}));
-cloud.rotation.x=-Math.PI/2;
-cloud.position.set(0,cloudY,0);
-scene.add(cloud);
+// ======== 街マップ（建物） ========
+const buildings = [];
+const colliders = [];
 
-// ======== 衝突判定 ========
-function getCloudAABB(mesh){
-  mesh.geometry.computeBoundingBox();
-  const bbox = mesh.geometry.boundingBox.clone();
+function createBuilding(x,z,w,h,d,color){
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mat = new THREE.MeshPhongMaterial({color: color || 0x888888});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.set(x,h/2,z);
+  scene.add(mesh);
+  buildings.push(mesh);
+  // 衝突判定用AABB
+  geo.computeBoundingBox();
+  const bbox = geo.boundingBox.clone();
   bbox.applyMatrix4(mesh.matrixWorld);
-  return bbox;
+  colliders.push(bbox);
 }
-const colliders = [getCloudAABB(cloud)];
+
+// 適当に街に建物を配置
+createBuilding(-30, -30, 20, 20, 20, 0xaa4444);
+createBuilding(40, -20, 15, 30, 15, 0x44aa44);
+createBuilding(-10, 40, 25, 25, 25, 0x4444aa);
+createBuilding(30, 30, 20, 15, 20, 0xaa8844);
+createBuilding(0, 0, 10, 40, 10, 0x44aaff);
 
 // ======== ジョイスティック (マルチタッチ対応) ========
 const joyBase = document.getElementById('joyBase');
@@ -93,7 +102,7 @@ let joyActive=false, joyStart={x:0,y:0}, joyVec={x:0,y:0}, joyPointerId=null;
 function getEventPoint(e){return e.touches?[{x:e.touches[0].clientX,y:e.touches[0].clientY}][0]:{x:e.clientX,y:e.clientY};}
 
 joyBase.addEventListener('pointerdown', e=>{
-  if(joyActive) return; // 既に操作中なら無視
+  if(joyActive) return;
   joyActive=true;
   joyPointerId = e.pointerId;
   const p=getEventPoint(e);
@@ -103,7 +112,7 @@ joyBase.addEventListener('pointerdown', e=>{
 });
 
 window.addEventListener('pointermove', e=>{
-  if(!joyActive || e.pointerId !== joyPointerId) return; // 自分の指以外は無視
+  if(!joyActive || e.pointerId !== joyPointerId) return;
   const p=getEventPoint(e);
   let dx=p.x-joyStart.x, dy=p.y-joyStart.y;
   const max=56;
@@ -124,10 +133,10 @@ window.addEventListener('pointerup', e=>{
   e.preventDefault();
 });
 
-// ======== ジャンプボタン (マルチタッチ対応) ========
+// ======== ジャンプボタン ========
 const jumpBtn=document.getElementById('jumpBtn');
 jumpBtn.addEventListener('pointerdown', e=>{
-  e.preventDefault(); // 選択防止
+  e.preventDefault();
   if(player.onGround){player.vel.y=jumpPower; player.onGround=false;}
 });
 jumpBtn.addEventListener('pointermove', e=>e.preventDefault());
@@ -162,7 +171,10 @@ function resolveCollisions(pos,radius,height,boxes){
   const push=new THREE.Vector3();
   for(const b of boxes){
     const cl=new THREE.Vector3(Math.max(b.min.x,Math.min(b.max.x,bottom.x)), Math.max(b.min.y,Math.min(b.max.y,bottom.y)), Math.max(b.min.z,Math.min(b.max.z,bottom.z)));
-    if(cl.distanceToSquared(bottom)<radius*radius){ const dir=bottom.clone().sub(cl).normalize(); push.add(dir.multiplyScalar(radius-Math.sqrt(cl.distanceToSquared(bottom)))); }
+    if(cl.distanceToSquared(bottom)<radius*radius){ 
+      const dir=bottom.clone().sub(cl).normalize(); 
+      push.add(dir.multiplyScalar(radius-Math.sqrt(cl.distanceToSquared(bottom)))); 
+    }
   }
   pos.add(push);
 }
@@ -212,3 +224,4 @@ window.addEventListener('resize', ()=>{renderer.setSize(window.innerWidth,window
 </script>
 </body>
 </html>
+ｄ
