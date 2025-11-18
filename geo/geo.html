@@ -929,16 +929,6 @@ let lastDistance = 0;
 let pinchCenterX = 0;
 let pinchCenterY = 0;
 
-//ピンチの中点座標を取得
-const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-
-//中点を基準に座標系を移動して拡大
-ctx.translate(centerX, centerY); // 中心へ移動
-ctx.scale(scaleChange, scaleChange); // 拡大縮小
-ctx.translate(-centerX, -centerY); // 元に戻す
-
 
 /* ============================================================================
    線画での地図描画（描画処理）
