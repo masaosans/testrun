@@ -747,35 +747,33 @@ joystick.on('move', (evt, data) => {
 //    moveX = Math.sin(angle) * force * 5; // 左右
 //    moveZ = Math.cos(angle) * force * 5; // 前後
 
-    if(!data) return;
-    const dist = data.distance; // 0~size
-    const angle = data.angle.radian; // ラジアン
+   if(!data) return;
 
-    // ジョイスティックのスクリーン方向 → ワールド方向変換
-    let forward = Math.cos(angle) * dist;
-    let right = Math.sin(angle) * dist;
+    // 移動スピード調整
+    const speed = 0.5;
 
-    // 適当なスケーリング
-    forward *= 0.5;
-    right *= 0.5;
+    // ジョイスティックのスクリーン入力
+    const dx = data.deltaX; // 右
+    const dy = data.deltaY; // 下
 
-    // カメラの正面ベクトル
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir); 
-    dir.y = 0; // 水平面だけ
-    dir.normalize();
+    // カメラの正面ベクトル（XZ平面）
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
 
-    // 右ベクトル（カメラの正面に対して右方向）
-    const rightVec = new THREE.Vector3();
-    rightVec.crossVectors(dir, camera.up).normalize();
+    // カメラの右ベクトル（正面 × 上方向）
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, camera.up).normalize();
 
-    // 移動量
-    camera.position.addScaledVector(dir, forward);
-    camera.position.addScaledVector(rightVec, right);
+    // 移動ベクトル
+    const move = new THREE.Vector3();
+    move.addScaledVector(forward, -dy * 0.01 * speed); // 上に動かすと前進
+    move.addScaledVector(right, dx * 0.01 * speed);     // 右に動かすと右方向
 
-    // OrbitControls ターゲットも一緒に移動
-    controls.target.addScaledVector(dir, forward);
-    controls.target.addScaledVector(rightVec, right);
+    // カメラ位置とOrbitControlsターゲットを移動
+    camera.position.add(move);
+    controls.target.add(move);
 });
 
 joystick.on('end', () => {
