@@ -917,13 +917,32 @@ fetch(geoUrl)
 
 
 /* ============================================================================
-   線画での地図描画
+   線画での地図描画（初期定義）
    ============================================================================ */
+// ★ 地図描画用の拡大縮小・オフセット
+let mapScale = 1;
+let mapOffsetX = 0;
+let mapOffsetY = 0;
 
-// マップ再描画
-let mapScale = 1.0;
+// ピンチ用
 let lastDistance = 0;
+let pinchCenterX = 0;
+let pinchCenterY = 0;
 
+//ピンチの中点座標を取得
+const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+
+//中点を基準に座標系を移動して拡大
+ctx.translate(centerX, centerY); // 中心へ移動
+ctx.scale(scaleChange, scaleChange); // 拡大縮小
+ctx.translate(-centerX, -centerY); // 元に戻す
+
+
+/* ============================================================================
+   線画での地図描画（描画処理）
+   ============================================================================ */
 function drawMap() {
     if(!geoData) return;
 
@@ -1020,24 +1039,6 @@ miniMap.addEventListener("click", e => {
    マップのオブジェクトのみスワイプ拡大
    ============================================================================ */
 // スマホのブラウザで画面拡大（スワイプでの拡大）しないように
-//ピンチの中点座標を取得
-const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-
-//中点を基準に座標系を移動して拡大
-ctx.translate(centerX, centerY); // 中心へ移動
-ctx.scale(scaleChange, scaleChange); // 拡大縮小
-ctx.translate(-centerX, -centerY); // 元に戻す
-
-
-//mapOffsetX, mapOffsetY の変数で全体オフセットを保持
-//前回の中心位置からの移動量も考慮して、常にピンチ中心で拡大されるようにする
-//修正版のピンチイベント
-
-let mapOffsetX = 0;
-let mapOffsetY = 0;
-
 miniMap.addEventListener('touchstart', e => {
     if(e.touches.length === 2){
         const dx = e.touches[0].clientX - e.touches[1].clientX;
