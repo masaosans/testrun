@@ -12,6 +12,14 @@
 <div id="info">
   ドラッグで移動 / ホイールでズーム。Tile Z=16, radius = <span id="rad">1</span>
 </div>
+<div id="joystick-zone" style="
+    position: absolute;
+    left: 20px;
+    bottom: 20px;
+    width: 120px;     /* 大きめに */
+    height: 120px;
+    z-index: 1000;
+"></div>
 
 <!-- Three.js と OrbitControls 読み込み -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
@@ -720,7 +728,7 @@ async function updateTilesAroundCamera(){
    ジョイスティックの追加
    ============================================================================ */
 const joystick = nipplejs.create({
-    zone: document.body,      // ジョイスティック表示領域
+    zone: document.getElementById('joystick-zone'), // 操作範囲を限定
     mode: 'static',           // 常に同じ位置に表示
     position: { left: '80px', bottom: '80px' },
     color: 'blue',
@@ -730,12 +738,44 @@ const joystick = nipplejs.create({
 let moveX = 0;
 let moveZ = 0;
 
+//ジョイスティックとカメラの方向を合わせる
 joystick.on('move', (evt, data) => {
-    const force = data.force; // 力の大きさ（0～1）
+
+//    const force = data.force; // 力の大きさ（0～1）
+//    const angle = data.angle.radian; // ラジアン
+
+//    moveX = Math.sin(angle) * force * 5; // 左右
+//    moveZ = Math.cos(angle) * force * 5; // 前後
+
+    if(!data) return;
+    const dist = data.distance; // 0~size
     const angle = data.angle.radian; // ラジアン
 
-    moveX = Math.sin(angle) * force * 5; // 左右
-    moveZ = Math.cos(angle) * force * 5; // 前後
+    // ジョイスティックのスクリーン方向 → ワールド方向変換
+    let forward = Math.cos(angle) * dist;
+    let right = Math.sin(angle) * dist;
+
+    // 適当なスケーリング
+    forward *= 0.5;
+    right *= 0.5;
+
+    // カメラの正面ベクトル
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir); 
+    dir.y = 0; // 水平面だけ
+    dir.normalize();
+
+    // 右ベクトル（カメラの正面に対して右方向）
+    const rightVec = new THREE.Vector3();
+    rightVec.crossVectors(dir, camera.up).normalize();
+
+    // 移動量
+    camera.position.addScaledVector(dir, forward);
+    camera.position.addScaledVector(rightVec, right);
+
+    // OrbitControls ターゲットも一緒に移動
+    controls.target.addScaledVector(dir, forward);
+    controls.target.addScaledVector(rightVec, right);
 });
 
 joystick.on('end', () => {
