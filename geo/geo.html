@@ -16,6 +16,7 @@
 <!-- Three.js と OrbitControls 読み込み -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.0/dist/nipplejs.min.js"></script>
 <script>
 /* ============================================================================
    基本設定値
@@ -715,6 +716,33 @@ async function updateTilesAroundCamera(){
     }
 }
 
+/* ============================================================================
+   ジョイスティックの追加
+   ============================================================================ */
+const joystick = nipplejs.create({
+    zone: document.body,      // ジョイスティック表示領域
+    mode: 'static',           // 常に同じ位置に表示
+    position: { left: '80px', bottom: '80px' },
+    color: 'blue',
+    size: 80
+});
+
+let moveX = 0;
+let moveZ = 0;
+
+joystick.on('move', (evt, data) => {
+    const force = data.force; // 力の大きさ（0～1）
+    const angle = data.angle.radian; // ラジアン
+
+    moveX = Math.sin(angle) * force * 5; // 左右
+    moveZ = Math.cos(angle) * force * 5; // 前後
+});
+
+joystick.on('end', () => {
+    moveX = 0;
+    moveZ = 0;
+});
+
 
 /* ============================================================================
    メイン描画ループ（アニメーション）
@@ -731,6 +759,23 @@ function animate(){
             if(obj instanceof THREE.LOD)
                 obj.update(camera);
         });
+    }
+
+    // カメラ移動（ジョイスティック）
+    if(moveX !== 0 || moveZ !== 0){
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        
+        // カメラの向きに合わせて前後移動
+        const forward = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+        const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
+
+        camera.position.add(forward.clone().multiplyScalar(moveZ));
+        camera.position.add(right.clone().multiplyScalar(moveX));
+
+        // OrbitControls のターゲットも同じだけ移動
+        controls.target.add(forward.clone().multiplyScalar(moveZ));
+        controls.target.add(right.clone().multiplyScalar(moveX));
     }
 
     updateTilesAroundCamera();
