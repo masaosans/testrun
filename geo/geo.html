@@ -740,43 +740,16 @@ let moveZ = 0;
 
 //ジョイスティックとカメラの方向を合わせる
 joystick.on('move', (evt, data) => {
+    if(!data) return;
 
-//    const force = data.force; // 力の大きさ（0～1）
-//    const angle = data.angle.radian; // ラジアン
+    const force = data.force; // 力の大きさ（0～1）
+    const angle = data.angle.radian; // ラジアン
+    moveX = Math.cos(angle) * force * 5; // 左右
+    moveZ = Math.sin(angle) * force * 5; // 前後
 
-//    moveX = Math.sin(angle) * force * 5; // 左右
-//    moveZ = Math.cos(angle) * force * 5; // 前後
+ //   moveX = Math.sin(angle) * force * 5; // 左右
+ //   moveZ = Math.cos(angle) * force * 5; // 前後
 
-      if(!data) return;
-
-    const speed = 0.5;
-
-    // 既存の dx, dy を新しいマッピングに変換
-    // 右操作 → 現在の上操作
-    // 上操作 → 現在の右操作
-    // 左操作 → 現在の下操作
-    // 下操作 → 現在の左操作
-    const mappedX = -data.deltaY; // 元の上下を左右に変換
-    const mappedZ = data.deltaX;  // 元の左右を前後に変換
-
-    // カメラの正面ベクトル（XZ平面）
-    const forward = new THREE.Vector3();
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-
-    // カメラの右ベクトル
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, camera.up).normalize();
-
-    // 移動ベクトル
-    const move = new THREE.Vector3();
-    move.addScaledVector(forward, mappedZ * 0.01 * speed); // 前後
-    move.addScaledVector(right, mappedX * 0.01 * speed);    // 左右
-
-    // カメラ位置とOrbitControlsターゲットを移動
-    camera.position.add(move);
-    controls.target.add(move);
 
 });
 
