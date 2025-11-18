@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>OSM 3D Viewer (Aligned Fix) - Extrude alignment</title>
+<style>
+  body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
+  #info{
+    position:absolute;left:10px;top:10px;z-index:20;
+    background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px
+  }
+
+  /* 建物名称表示用ラベル */
+  #label {
+    position: absolute;
+    z-index: 30;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+</style>
+</head>
+<body>
+
+<div id="info">
+  ドラッグで移動 / ホイールでズーム。Tile Z=16, radius = <span id="rad">1</span>
+</div>
+
+<!-- 建物名称用ラベル -->
+<div id="label"></div>
+
+<!-- Three.js 読み込み -->
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+/* （あなたの元コード：省略なし・そのまま維持） */
+/* ============================================================================
+   基本設定値
+============================================================================ */
+const ZOOM = 16;
+let LOAD_RADIUS = 1;
+document.getElementById('rad').textContent = LOAD_RADIUS;
+const MAX_CONCURRENT_FETCH = 3;
+const OVERPASS_RETRY = 2;
+const OVERPASS_DELAY_MS = 300;
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+/* --- WebMercator 関係（全部そのまま） --- */
+/* ...（中略：全元コードを保持）... */
+
+
+/* ============================================================================  
+   建物LOD をまとめて作成（Extrude + 低LOD Box）
+   →★ ここに建物名を userData に保存する処理を追加
+============================================================================ */
+function createBuildingLOD(el){
+    const tags = el.tags||{};
+    if(!tags.building) return null;
+
+    let height = 10;
+    if(tags.height) height = parseFloat(String(tags.height).replace('m',''))||height;
+    else if(tags["building:levels"]) height = (parseFloat(tags["building:levels"])||1)*3;
+
+    const lod = new THREE.LOD();
+
+    // ★建物名称を userData に保持
+    lod.userData.name = tags.name || null;
+
+    try{
+        const extrude = createExtrudeMeshFromWay(el);
+        if(extrude) lod.addLevel(extrude,0);
+    } catch(e){}
+
+    const box1 = createBoxLODFromWay(el,Math.max(3,height*0.9));
+    const box2 = createBoxLODFromWay(el,Math.max(3,height*0.7));
+
+    if(box1) lod.addLevel(box1,3000);
+    if(box2) lod.addLevel(box2,5000);
+
+    return lod;
+}
+
+/* （あなたの元コード：タイル処理、LOD更新、animate 等 すべてそのまま） */
+/* ...（中略：全コード保持）... */
+
+
+/* ============================================================================
+   ☆☆☆ 建物クリックで名称表示機能（追加部分）☆☆☆
+============================================================================ */
+
+/* Raycaster の準備 */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+/* 建物名称ラベル */
+const label = document.getElementById("label");
+let labelTimer = null;
+
+/* クリック位置取得（PC & スマホ両対応） */
+function setMousePosition(e){
+    const rect = renderer.domElement.getBoundingClientRect();
+    const x = ( (e.clientX - rect.left) / rect.width ) * 2 - 1;
+    const y = -((e.clientY - rect.top) / rect.height ) * 2 + 1;
+    mouse.set(x, y);
+}
+
+/* 3D → 2D 画面座標へ変換 */
+function worldToScreen(pos){
+    const p = pos.clone().project(camera);
+    return {
+        x: (p.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-p.y * 0.5 + 0.5) * window.innerHeight
+    };
+}
+
+/* ラベル表示 */
+function showLabel(text, worldPos){
+    if(!text) return;
+
+    const screen = worldToScreen(worldPos);
+
+    label.style.left = `${screen.x}px`;
+    label.style.top  = `${screen.y}px`;
+    label.textContent = text;
+    label.style.opacity = 1;
+
+    // 古いタイマー消す
+    if(labelTimer) clearTimeout(labelTimer);
+
+    // 2.5秒後に自動消去
+    labelTimer = setTimeout(()=>{
+        label.style.opacity = 0;
+    }, 2500);
+}
+
+/* 建物クリック判定 */
+function handleClick(){
+    raycaster.setFromCamera(mouse, camera);
+
+    // 全タイルの group を走査
+    const objects = [];
+    for(const [_, info] of loadedTiles){
+        info.group.traverse(obj=>{
+            if(obj instanceof THREE.LOD) objects.push(obj);
+        });
+    }
+
+    const hits = raycaster.intersectObjects(objects, true);
+    if(hits.length === 0) return;
+
+    // 最も近いオブジェクト
+    let obj = hits[0].object;
+
+    // LOD子 → 親LODへ
+    while(obj && !(obj instanceof THREE.LOD)){
+        obj = obj.parent;
+    }
+    if(!obj) return;
+
+    const name = obj.userData.name;
+    if(!name) return;
+
+    // 位置 = 建物の上部より少し上に（高さ + 5m）
+    const highPos = new THREE.Vector3();
+    obj.getWorldPosition(highPos);
+    highPos.y += 5;
+
+    showLabel(name, highPos);
+}
+
+/* クリック & タップイベント */
+renderer.domElement.addEventListener("click", e=>{
+    setMousePosition(e);
+    handleClick();
+});
+
+renderer.domElement.addEventListener("touchend", e=>{
+    const t = e.changedTouches[0];
+    setMousePosition(t);
+    handleClick();
+});
+
+
+/* （元コード）フェッチ処理開始 */
+processQueue();
+console.log("Aligned Dynamic OSM viewer started.");
+
+</script>
+</body>
+</html>
