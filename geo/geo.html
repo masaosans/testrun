@@ -5,13 +5,11 @@
 <title>OSM 3D Viewer (Aligned Fix) - Extrude alignment</title>
 <style>
   body{margin:0;overflow:hidden;font-family:Arial,Helvetica;}
-  #info{position:absolute;left:10px;top:10px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:6px;font-size:13px}
 </style>
 </head>
 <body>
-<div id="info">
-  ドラッグで移動 / ホイールでズーム。Tile Z=16, radius = <span id="rad">1</span>
-</div>
+<button id="mapButton" style="position:absolute;top:10px;left:10px;z-index:50;">日本地図</button>
+<canvas id="miniMap" style="position:absolute;top:50px;left:10px;z-index:50;display:none;border:1px solid #333;"></canvas>
 <div id="joystick-zone" style="
     position: absolute;
     left: 20px;
@@ -828,6 +826,93 @@ window.addEventListener('keydown', e=>{
 /* フェッチキューの処理開始 */
 processQueue();
 console.log("Aligned Dynamic OSM viewer started.");
+
+/* ============================================================================
+   ミニマップの描画処理
+   ============================================================================ */
+
+// ミニマップのキャンバス
+const miniMap = document.getElementById("miniMap");
+const ctx = miniMap.getContext("2d");
+
+// キャンバスサイズ
+miniMap.width = 300;
+miniMap.height = 400;
+
+// 緯度経度範囲（北西/南東）
+const latMax = 45.5, latMin = 24;
+const lonMin = 122, lonMax = 153;
+
+// GeoJSON URL（例：日本全体の輪郭）
+// ここでは簡易例として自作のデータでもOK
+const geoUrl = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
+
+let geoData = null;
+
+fetch(geoUrl)
+    .then(res => res.json())
+    .then(json => {
+        geoData = json;
+        drawMiniMap();
+    });
+
+// 線画で描画
+function drawMiniMap() {
+    if(!geoData) return;
+    ctx.clearRect(0,0,miniMap.width,miniMap.height);
+
+    ctx.strokeStyle = "#333";
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    geoData.features.forEach(feature => {
+        const coordsArray = feature.geometry.coordinates;
+        // GeoJSON の型は Polygon / MultiPolygon
+        coordsArray.forEach(polygon => {
+            polygon.forEach(ring => {
+                ring.forEach((pt, i) => {
+                    const x = ((pt[0]-lonMin)/(lonMax-lonMin)) * miniMap.width;
+                    const y = ((latMax-pt[1])/(latMax-latMin)) * miniMap.height;
+                    if(i===0) ctx.moveTo(x,y);
+                    else ctx.lineTo(x,y);
+                });
+            });
+        });
+    });
+    ctx.stroke();
+}
+
+/* ============================================================================
+   地図ボタン押下時の処理
+   ============================================================================ */
+const mapButton = document.getElementById("mapButton");
+mapButton.addEventListener("click", () => {
+    miniMap.style.display = miniMap.style.display === "none" ? "block" : "none";
+});
+
+
+/* ============================================================================
+   マップクリック時の挙動
+   ============================================================================ */
+miniMap.addEventListener("click", e => {
+    const rect = miniMap.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const lon = lonMin + (x / miniMap.width) * (lonMax - lonMin);
+    const lat = latMax - (y / miniMap.height) * (latMax - latMin);
+
+    const m = lonLatToMerc(lon, lat);
+    const cameraHeight = camera.position.y; // 高さ維持
+    camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
+    controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
+    controls.update();
+
+    updateTilesAroundCamera();
+
+    miniMap.style.display = "none";
+});
+
 </script>
 </body>
 </html>
