@@ -922,10 +922,10 @@ fetch(geoUrl)
 
 function drawMap() {
     if(!geoData) return;
-    ctx.clearRect(0,0,fullMap.width,fullMap.height);
+    ctx.clearRect(0,0,miniMap.width,miniMap.height);
 
-    const cw = fullMap.width;
-    const ch = fullMap.height;
+    const cw = miniMap.width;
+    const ch = miniMap.height;
 
     const lonRange = lonMax - lonMin;
     const latRange = latMax - latMin;
@@ -976,13 +976,13 @@ mapButton.addEventListener("click", () => {
    マップクリック時の挙動
    ============================================================================ */
 // クリック座標変換も同様
-fullMap.addEventListener("click", e => {
-    const rect = fullMap.getBoundingClientRect();
+miniMap.addEventListener("click", e => {
+    const rect = miniMap.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    const cw = fullMap.width;
-    const ch = fullMap.height;
+    const cw = miniMap.width;
+    const ch = miniMap.height;
     const lonRange = lonMax - lonMin;
     const latRange = latMax - latMin;
     const mapRatio = lonRange / latRange;
@@ -1006,7 +1006,7 @@ fullMap.addEventListener("click", e => {
     controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
     updateTilesAroundCamera();
-    fullMap.style.display = "none";
+    miniMap.style.display = "none";
 });
 </script>
 </body>
