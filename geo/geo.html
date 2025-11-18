@@ -744,11 +744,12 @@ joystick.on('move', (evt, data) => {
 
     const force = data.force; // 力の大きさ（0～1）
     const angle = data.angle.radian; // ラジアン
-    moveX = Math.cos(angle) * force * 5; // 左右
-    moveZ = Math.sin(angle) * force * 5; // 前後
 
+　//下記だと動きがあっていないため、左右と前後を入れ替え（sincos入れ替え）、左と右を入れ替え（-を追加）
  //   moveX = Math.sin(angle) * force * 5; // 左右
- //   moveZ = Math.cos(angle) * force * 5; // 前後
+ //   moveZ = Math.cos(angle) * force * 5; // 前後    
+    moveX = Math.cos(angle) * force * -5; // 左右
+    moveZ = Math.sin(angle) * force * 5; // 前後
 
 
 });
