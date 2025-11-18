@@ -612,10 +612,15 @@ function handleBuildingClick(){
 
     const height = obj.userData.height || 10;
 
+//
+   // ★ 修正: LOD内の実際のメッシュ位置を取得
+    let targetMesh = hits[0].object; // タップした正確なメッシュ
+    const pos = new THREE.Vector3();
+    targetMesh.getWorldPosition(pos); // ワールド座標取得
 
     // 建物の上に十分余裕を持たせる (+ height*0.6)
-    const pos = new THREE.Vector3();
-    obj.getWorldPosition(pos);
+    //const pos = new THREE.Vector3();
+    //obj.getWorldPosition(pos);
  //   pos.y += height * 0.6 + 10;
     pos.y += 20;
 
