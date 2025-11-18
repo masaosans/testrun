@@ -929,6 +929,9 @@ let lastDistance = 0;
 let pinchCenterX = 0;
 let pinchCenterY = 0;
 
+//マーカー
+let markerLon = null;
+let markerLat = null;
 
 /* ============================================================================
    線画での地図描画（描画処理）
@@ -977,6 +980,17 @@ function drawMap() {
     });
 
     ctx.stroke();
+    // --- マーカー描画 ---
+    if (markerLon !== null && markerLat !== null) {
+        const mx = xOffset + (markerLon - lonMin) * scale;
+        const my = yOffset + (latMax - markerLat) * scale;
+
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(mx, my, 6, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
     ctx.restore();
 }
 /* ============================================================================
@@ -991,7 +1005,8 @@ mapButton.addEventListener("click", () => {
 /* ============================================================================
    マップクリック時の挙動
    ============================================================================ */
-// クリック座標変換も同様
+
+   // クリック座標変換も同様
 miniMap.addEventListener("click", e => {
     const rect = miniMap.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -1022,6 +1037,14 @@ miniMap.addEventListener("click", e => {
     controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
     updateTilesAroundCamera();
+ 
+    // クリック位置をマーカーとして記録
+    markerLon = lon;
+    markerLat = lat;
+
+    // マップ再描画
+    drawMap();
+
     miniMap.style.display = "none";
 });
 
