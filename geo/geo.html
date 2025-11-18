@@ -920,47 +920,33 @@ fetch(geoUrl)
    線画での地図描画
    ============================================================================ */
 
+// マップ再描画
+let mapScale = 1.0;
+let lastDistance = 0;
 function drawMap() {
     if(!geoData) return;
+
     ctx.clearRect(0,0,miniMap.width,miniMap.height);
-
-    const cw = miniMap.width;
-    const ch = miniMap.height;
-
-    const lonRange = lonMax - lonMin;
-    const latRange = latMax - latMin;
-    const mapRatio = lonRange / latRange;
-    const canvasRatio = cw / ch;
-
-    let scale, xOffset=0, yOffset=0;
-    if(canvasRatio > mapRatio){
-        // キャンバスが横長 → 高さ基準
-        scale = ch / latRange;
-        xOffset = (cw - scale * lonRange)/2;
-    } else {
-        // キャンバスが縦長 → 幅基準
-        scale = cw / lonRange;
-        yOffset = (ch - scale * latRange)/2;
-    }
-
+    ctx.save();
+    ctx.scale(mapScale, mapScale); // ←ここで描画全体をスケーリング
     ctx.strokeStyle = "#333";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
+    ctx.lineWidth = 1 / mapScale; // 線の太さを補正
 
     geoData.features.forEach(feature => {
-        const coordsArray = feature.geometry.coordinates;
-        coordsArray.forEach(polygon => {
+        feature.geometry.coordinates.forEach(polygon => {
             polygon.forEach(ring => {
                 ring.forEach((pt, i) => {
-                    const x = xOffset + (pt[0]-lonMin) * scale;
-                    const y = yOffset + (latMax-pt[1]) * scale;
-                    if(i===0) ctx.moveTo(x,y);
-                    else ctx.lineTo(x,y);
+                    const x = (pt[0]-lonMin) * scaleX;
+                    const y = (latMax-pt[1]) * scaleY;
+                    if(i===0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
                 });
             });
         });
     });
+
     ctx.stroke();
+    ctx.restore();
 }
 
 /* ============================================================================
@@ -1009,12 +995,38 @@ miniMap.addEventListener("click", e => {
     miniMap.style.display = "none";
 });
 
-
+/* ============================================================================
+   マップのオブジェクトのみスワイプ拡大
+   ============================================================================ */
 // スマホのブラウザで画面拡大（スワイプでの拡大）しないように
 miniMap.addEventListener('touchmove', e => {
     if(e.touches.length > 1) e.preventDefault();
 }, { passive: false });
 
+// スワイプ検知
+miniMap.addEventListener('touchstart', e => {
+    if(e.touches.length === 2){
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        lastDistance = Math.hypot(dx, dy);
+    }
+}, { passive: false });
+
+miniMap.addEventListener('touchmove', e => {
+    if(e.touches.length === 2){
+        e.preventDefault();
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const distance = Math.hypot(dx, dy);
+
+        const scaleChange = distance / lastDistance;
+        mapScale *= scaleChange;
+        mapScale = Math.min(Math.max(mapScale, 0.5), 5); // 上限・下限
+        lastDistance = distance;
+
+        drawMap(); // 再描画
+    }
+}, { passive: false });
 
 </script>
 </body>
