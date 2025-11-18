@@ -1008,6 +1008,14 @@ miniMap.addEventListener("click", e => {
     updateTilesAroundCamera();
     miniMap.style.display = "none";
 });
+
+
+// スマホのブラウザで画面拡大（スワイプでの拡大）しないように
+miniMap.addEventListener('touchmove', e => {
+    if(e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
+
 </script>
 </body>
 </html>
