@@ -923,21 +923,42 @@ fetch(geoUrl)
 // マップ再描画
 let mapScale = 1.0;
 let lastDistance = 0;
+
 function drawMap() {
     if(!geoData) return;
 
-    ctx.clearRect(0,0,miniMap.width,miniMap.height);
+    ctx.clearRect(0, 0, miniMap.width, miniMap.height);
     ctx.save();
-    ctx.scale(mapScale, mapScale); // ←ここで描画全体をスケーリング
+    ctx.scale(mapScale, mapScale); // ズーム倍率
+
+    const cw = miniMap.width;
+    const ch = miniMap.height;
+
+    const lonRange = lonMax - lonMin;
+    const latRange = latMax - latMin;
+    const mapRatio = lonRange / latRange;
+    const canvasRatio = cw / ch;
+
+    let scale, xOffset=0, yOffset=0;
+    if(canvasRatio > mapRatio){
+        scale = ch / latRange;
+        xOffset = (cw - scale * lonRange)/2;
+    } else {
+        scale = cw / lonRange;
+        yOffset = (ch - scale * latRange)/2;
+    }
+
     ctx.strokeStyle = "#333";
-    ctx.lineWidth = 1 / mapScale; // 線の太さを補正
+    ctx.lineWidth = 1 / mapScale; // 線の太さ補正
+    ctx.beginPath();
 
     geoData.features.forEach(feature => {
-        feature.geometry.coordinates.forEach(polygon => {
+        const coordsArray = feature.geometry.coordinates;
+        coordsArray.forEach(polygon => {
             polygon.forEach(ring => {
                 ring.forEach((pt, i) => {
-                    const x = (pt[0]-lonMin) * scaleX;
-                    const y = (latMax-pt[1]) * scaleY;
+                    const x = xOffset + (pt[0]-lonMin) * scale; // ← scale を使用
+                    const y = yOffset + (latMax-pt[1]) * scale; // ← scale を使用
                     if(i===0) ctx.moveTo(x, y);
                     else ctx.lineTo(x, y);
                 });
@@ -948,7 +969,6 @@ function drawMap() {
     ctx.stroke();
     ctx.restore();
 }
-
 /* ============================================================================
    地図ボタン押下時の処理
    ============================================================================ */
