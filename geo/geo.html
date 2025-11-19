@@ -61,20 +61,22 @@ body{
   height: 120px;
   z-index: 1000;
 }
-</style>
-</head>
-<body>
-</div>
-<div id="cameraPos" style="
+/* 緯度経度表示領域 */
+#cameraPos {
     position: absolute;
     top: 10px;
     right: 10px;
     z-index: 20;
-    background: rgba(255,255,255,0.9);
+    background: rgba(255, 255, 255, 0.9);
     padding: 6px 10px;
     border-radius: 6px;
     font-size: 13px;
-">Lat: 0, Lon: 0</div>
+}
+</style>
+</head>
+<body>
+</div>
+<div id="cameraPos">Lat: 0, Lon: 0</div>
 <button id="mapButton">日本地図</button>
 <canvas id="miniMap"></canvas>
 <div id="joystick-zone"></div>
@@ -1041,10 +1043,10 @@ mapButton.addEventListener("click", () => {
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
     const rect = miniMap.getBoundingClientRect();
-    const clickX = (e.clientX - rect.left - mapOffsetX) / mapScale;
-    const clickY = (e.clientY - rect.top  - mapOffsetY) / mapScale;
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
 
-    // drawMap() と同じ scale/xOffset/yOffset を再計算
+    // drawMap() と同じ scale/xOffset/yOffset を計算
     const cw = miniMap.width;
     const ch = miniMap.height;
     const lonRange = lonMax - lonMin;
@@ -1062,14 +1064,14 @@ miniMap.addEventListener("click", e => {
     }
 
     // タップ座標 → 緯度経度
-    const lon = lonMin + (clickX - xOffset);
-    const lat = latMax - (clickY - yOffset);
+    const lon = lonMin + (clickX - xOffset) / scale;
+    const lat = latMax - (clickY - yOffset) / scale;
 
     // マーカー座標を保存
     markerLon = lon;
     markerLat = lat;
 
-    // カメラ移動
+    // カメラ位置を Three.js ワールド座標に変換
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
     camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
