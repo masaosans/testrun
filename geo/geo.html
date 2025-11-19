@@ -1105,6 +1105,30 @@ miniMap.addEventListener('touchmove', e => {
     }
 }, { passive: false });
 
+/* ===============================
+   レスポンシブ対応
+================================ */
+function onWindowResize() {
+    // Three.js canvas
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+
+    // ミニマップのサイズ調整（幅の20%）
+    const miniMap = document.getElementById("miniMap");
+    miniMap.width = window.innerWidth * 0.25;
+    miniMap.height = window.innerHeight * 0.25;
+
+    // ジョイスティック（画面の15%）
+    const joy = document.getElementById("joystick-zone");
+    const size = Math.max(window.innerWidth, window.innerHeight) * 0.12;
+    joy.style.width = size + "px";
+    joy.style.height = size + "px";
+}
+
+window.addEventListener("resize", onWindowResize);
+onWindowResize();
+
 </script>
 </body>
 </html>
