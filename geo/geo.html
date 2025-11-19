@@ -75,8 +75,17 @@ body{
 </head>
 <body>
 <div id="info">
-  ドラッグで移動 / ホイールでズーム。Tile Z=16, radius = <span id="rad">1</span>
 </div>
+<div id="cameraPos" style="
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 20;
+    background: rgba(255,255,255,0.9);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+">Lat: 0, Lon: 0</div>
 <button id="mapButton">日本地図</button>
 <canvas id="miniMap"></canvas>
 <div id="joystick-zone"></div>
@@ -745,6 +754,17 @@ function cameraToLonLat(){
 
 
 /* ============================================================================
+   カメラ表示位置（緯度経度）の画面表示
+   ============================================================================ */
+// 右上に表示
+const cameraPosDiv = document.getElementById("cameraPos");
+
+function updateDisplayPosition(){
+    const pos = cameraToLonLat(); // controls.target の位置を取得
+    cameraPosDiv.textContent = `Lat: ${pos.lat.toFixed(6)}, Lon: ${pos.lon.toFixed(6)}`;
+}
+
+/* ============================================================================
    タイル更新ループ
    ============================================================================ */
 
@@ -854,6 +874,8 @@ function animate(){
     }
 
     updateTilesAroundCamera();
+    updateDisplayPosition(); // カメラ表示位置（緯度経度）の画面表示更新
+
     renderer.render(scene,camera);
 }
 animate();
