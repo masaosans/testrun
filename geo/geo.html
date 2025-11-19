@@ -1042,12 +1042,31 @@ mapButton.addEventListener("click", () => {
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
     const rect = miniMap.getBoundingClientRect();
+
+    // クリック座標
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    // 保存した scale / offset を使って正確に変換
-    const lon = lonMin + (clickX - mapOffsetX) / mapScale;
-    const lat = latMax - (clickY - mapOffsetY) / mapScale;
+    // ミニマップ中央寄せや拡大縮小の補正
+    const cw = miniMap.width;
+    const ch = miniMap.height;
+    const lonRange = lonMax - lonMin;
+    const latRange = latMax - latMin;
+    const mapRatio = lonRange / latRange;
+    const canvasRatio = cw / ch;
+
+    let scale, xOffset=0, yOffset=0;
+    if(canvasRatio > mapRatio){
+        scale = ch / latRange;
+        xOffset = (cw - scale * lonRange)/2;
+    } else {
+        scale = cw / lonRange;
+        yOffset = (ch - scale * latRange)/2;
+    }
+
+    // 実際のクリック位置から経度緯度へ
+    const lon = lonMin + (clickX - mapOffsetX - xOffset) / scale;
+    const lat = latMax - (clickY - mapOffsetY - yOffset) / scale;
 
     markerLon = lon;
     markerLat = lat;
