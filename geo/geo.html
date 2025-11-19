@@ -982,15 +982,35 @@ function drawMap() {
     ctx.stroke();
     // --- マーカー描画 ---
     if (markerLon !== null && markerLat !== null) {
-        const mx = xOffset + (markerLon - lonMin) * scale;
-        const my = yOffset + (latMax - markerLat) * scale;
+
+        const cw = miniMap.width;
+        const ch = miniMap.height;
+
+        const lonRange = lonMax - lonMin;
+        const latRange = latMax - latMin;
+        const mapRatio = lonRange / latRange;
+        const canvasRatio = cw / ch;
+
+        let scale, xOffset=0, yOffset=0;
+        if(canvasRatio > mapRatio){
+            scale = ch / latRange;
+            xOffset = (cw - scale * lonRange)/2;
+        } else {
+            scale = cw / lonRange;
+            yOffset = (ch - scale * latRange)/2;
+        }
+
+        const sx = xOffset + (markerLon - lonMin) * scale;
+        const sy = yOffset + (latMax - markerLat) * scale;
+
+        const drawX = mapOffsetX + sx * mapScale;
+        const drawY = mapOffsetY + sy * mapScale;
 
         ctx.fillStyle = "red";
         ctx.beginPath();
-        ctx.arc(mx, my, 6, 0, Math.PI * 2);
+        ctx.arc(drawX, drawY, 6, 0, Math.PI * 2);
         ctx.fill();
     }
-
     ctx.restore();
 }
 /* ============================================================================
@@ -1006,11 +1026,11 @@ mapButton.addEventListener("click", () => {
    マップクリック時の挙動
    ============================================================================ */
 
-   // クリック座標変換も同様
+// ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
     const rect = miniMap.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
+    const clickX = (e.clientX - rect.left - mapOffsetX) / mapScale;
+    const clickY = (e.clientY - rect.top  - mapOffsetY) / mapScale;
 
     const cw = miniMap.width;
     const ch = miniMap.height;
@@ -1031,20 +1051,19 @@ miniMap.addEventListener("click", e => {
     const lon = lonMin + (clickX - xOffset) / scale;
     const lat = latMax - (clickY - yOffset) / scale;
 
+    // ---- マーカー座標を保存 ----
+    markerLon = lon;
+    markerLat = lat;
+
+    // ---- カメラ移動 ----
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
     camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
     controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
     updateTilesAroundCamera();
- 
-    // クリック位置をマーカーとして記録
-    markerLon = lon;
-    markerLat = lat;
 
-    // マップ再描画
     drawMap();
-
     miniMap.style.display = "none";
 });
 
