@@ -1000,16 +1000,12 @@ function drawMap() {
     miniCtx.stroke();
     // --- マーカー描画 ---
     if (markerLon !== null && markerLat !== null) {
-        // 緯度経度 → 地図上座標
-        const sx = (markerLon - lonMin) / (lonMax - lonMin) * (lonMax - lonMin) * scale; // sxを地図座標に
-        const sy = (latMax - markerLat) / (latMax - latMin) * (latMax - latMin) * scale;
-
-        const drawX = mapOffsetX + sx;
-        const drawY = mapOffsetY + sy;
+        const sx = xOffset + (markerLon - lonMin) * scale;
+        const sy = yOffset + (latMax - markerLat) * scale;
 
         miniCtx.fillStyle = "red";
         miniCtx.beginPath();
-        miniCtx.arc(drawX, drawY, 6 / mapScale, 0, Math.PI * 2); // 拡大縮小時にサイズも補正
+        miniCtx.arc(sx, sy, 6 / mapScale, 0, Math.PI * 2);
         miniCtx.fill();
     }
     miniCtx.restore();
@@ -1038,6 +1034,7 @@ miniMap.addEventListener("click", e => {
     const clickX = (e.clientX - rect.left - mapOffsetX) / mapScale;
     const clickY = (e.clientY - rect.top  - mapOffsetY) / mapScale;
 
+    // drawMap() と同じ scale/xOffset/yOffset を再計算
     const cw = miniMap.width;
     const ch = miniMap.height;
     const lonRange = lonMax - lonMin;
@@ -1054,14 +1051,15 @@ miniMap.addEventListener("click", e => {
         yOffset = (ch - scale * latRange)/2;
     }
 
-    const lon = lonMin + (clickX - xOffset) / scale;
-    const lat = latMax - (clickY - yOffset) / scale;
+    // タップ座標 → 緯度経度
+    const lon = lonMin + (clickX - xOffset);
+    const lat = latMax - (clickY - yOffset);
 
-    // ---- マーカー座標を保存 ----
+    // マーカー座標を保存
     markerLon = lon;
     markerLat = lat;
 
-    // ---- カメラ移動 ----
+    // カメラ移動
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
     camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
