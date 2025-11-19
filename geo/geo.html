@@ -947,6 +947,12 @@ let pinchCenterY = 0;
 let markerLon = null;
 let markerLat = null;
 
+//miniMapのタップ位置計算用
+// グローバルに追加
+let mapScaleGlobal = 1;
+let mapOffsetXGlobal = 0;
+let mapOffsetYGlobal = 0;
+
 /* ============================================================================
    線画での地図描画（描画処理）
    ============================================================================ */
@@ -973,6 +979,10 @@ function drawMap() {
         scale = cw / lonRange;
         yOffset = (ch - scale * latRange)/2;
     }
+    //タップ位置の獲得用に保存
+    mapScaleGlobal = scale;
+    mapOffsetXGlobal = xOffset;
+    mapOffsetYGlobal = yOffset;
 
     miniCtx.strokeStyle = "#333";
     miniCtx.lineWidth = 1 / mapScale; // 線の太さ補正
@@ -1058,11 +1068,11 @@ miniMap.addEventListener("click", e => {
         scale = cw / lonRange;
         yOffset = (ch - scale * latRange)/2;
     }
+
     mapScaleGlobal = scale;
     mapOffsetXGlobal = xOffset;
     mapOffsetYGlobal = yOffset;
 
-   
     const rect = miniMap.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
@@ -1081,11 +1091,12 @@ miniMap.addEventListener("click", e => {
     camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
     controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
-    updateTilesAroundCamera();
 
+    updateTilesAroundCamera();
     drawMap();
     miniMap.style.display = "none";
 });
+
 /* ============================================================================
    マップのオブジェクトのみスワイプ拡大
    ============================================================================ */
