@@ -1017,9 +1017,9 @@ function drawMap() {
         const drawY = mapOffsetY + sy;
 
         ctx.fillStyle = "red";
-        ctx.beginPath();
-        ctx.arc(drawX, drawY, 6 / mapScale, 0, Math.PI * 2); // 拡大縮小時にサイズも補正
-        ctx.fill();
+        miniCtx.beginPath();
+        miniCtx.arc(drawX, drawY, 6 / mapScale, 0, Math.PI * 2); // 拡大縮小時にサイズも補正
+        miniCtx.fill();
     }
     miniCtx.restore();
 }
