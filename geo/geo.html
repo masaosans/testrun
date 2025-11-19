@@ -974,24 +974,36 @@ function drawMap() {
 
     ctx.strokeStyle = "#333";
     ctx.lineWidth = 1 / mapScale; // 線の太さ補正
+    // --- GeoJSON の Polygon / MultiPolygon 両対応の描画 ---
     ctx.beginPath();
 
     geoData.features.forEach(feature => {
-        const coordsArray = feature.geometry.coordinates;
+        const geom = feature.geometry;
 
-        coordsArray.forEach(polygon => {
-            polygon.forEach(ring => {
-                ring.forEach((pt, i) => {
-                    const m = lonLatToMercator(pt[0], pt[1]);
-
-                    const x = xOffset + (m.x - mercLonMin) * scale;
-                    const y = yOffset + (mercLatMax - m.y) * scale;
-
-                    if(i === 0) ctx.moveTo(x, y);
+        if (geom.type === "Polygon") {
+            // Polygon の場合
+            geom.coordinates.forEach(ring => {
+                ring.forEach((pt, idx) => {
+                    const x = xOffset + (pt[0] - lonMin) * scale;
+                    const y = yOffset + (latMax - pt[1]) * scale;
+                    if (idx === 0) ctx.moveTo(x, y);
                     else ctx.lineTo(x, y);
                 });
             });
-        });
+
+        } else if (geom.type === "MultiPolygon") {
+            // MultiPolygon の場合
+            geom.coordinates.forEach(polygon => {
+                polygon.forEach(ring => {
+                    ring.forEach((pt, idx) => {
+                        const x = xOffset + (pt[0] - lonMin) * scale;
+                        const y = yOffset + (latMax - pt[1]) * scale;
+                        if (idx === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    });
+                });
+            });
+        }
     });
 
     ctx.stroke();
