@@ -11,16 +11,6 @@ body{
     overflow:hidden;
     font-family:Arial,Helvetica;
 }
-#info{
-    position:absolute;
-    left:10px;
-    top:10px;
-    z-index:20;
-    background:rgba(255,255,255,0.9);
-    padding:8px;
-    border-radius:6px;
-    font-size:13px
-}
 #mapButton {
   position: absolute;
   top: 15px;
@@ -74,7 +64,6 @@ body{
 </style>
 </head>
 <body>
-<div id="info">
 </div>
 <div id="cameraPos" style="
     position: absolute;
@@ -112,7 +101,6 @@ const ZOOM = 16;
     - 数字を増やすと広い範囲をロードするが Overpass の負荷・描画負荷が増える
 */
 let LOAD_RADIUS = 1;
-document.getElementById('rad').textContent = LOAD_RADIUS;
 
 /*
   同時に実行するフェッチ数
