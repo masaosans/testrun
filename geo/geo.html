@@ -894,7 +894,7 @@ console.log("Aligned Dynamic OSM viewer started.");
 // ミニマップのキャンバス
 
 const miniMap = document.getElementById("miniMap");
-const ctx = miniMap.getContext("2d");
+const miniCtx = miniMap.getContext("2d");
 
 function resizeCanvas() {
     miniMap.width = window.innerWidth;
@@ -950,10 +950,10 @@ const mercLatMin = mSE.y;
 function drawMap() {
     if(!geoData) return;
 
-    ctx.clearRect(0, 0, miniMap.width, miniMap.height);
-    ctx.save();
-    ctx.translate(mapOffsetX, mapOffsetY); // オフセット反映
-    ctx.scale(mapScale, mapScale);         // 拡大縮小
+    miniCtx.clearRect(0, 0, miniMap.width, miniMap.height);
+    miniCtx.save();
+    miniCtx.translate(mapOffsetX, mapOffsetY); // オフセット反映
+    miniCtx.scale(mapScale, mapScale);         // 拡大縮小
 
     const cw = miniMap.width;
     const ch = miniMap.height;
@@ -972,10 +972,10 @@ function drawMap() {
         yOffset = (ch - scale * latRange)/2;
     }
 
-    ctx.strokeStyle = "#333";
-    ctx.lineWidth = 1 / mapScale; // 線の太さ補正
+    miniCtx.strokeStyle = "#333";
+    miniCtx.lineWidth = 1 / mapScale; // 線の太さ補正
     // --- GeoJSON の Polygon / MultiPolygon 両対応の描画 ---
-    ctx.beginPath();
+    miniCtx.beginPath();
 
     geoData.features.forEach(feature => {
         const geom = feature.geometry;
@@ -986,8 +986,8 @@ function drawMap() {
                 ring.forEach((pt, idx) => {
                     const x = xOffset + (pt[0] - lonMin) * scale;
                     const y = yOffset + (latMax - pt[1]) * scale;
-                    if (idx === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
+                    if (idx === 0) miniCtx.moveTo(x, y);
+                    else miniCtx.lineTo(x, y);
                 });
             });
 
@@ -998,15 +998,15 @@ function drawMap() {
                     ring.forEach((pt, idx) => {
                         const x = xOffset + (pt[0] - lonMin) * scale;
                         const y = yOffset + (latMax - pt[1]) * scale;
-                        if (idx === 0) ctx.moveTo(x, y);
-                        else ctx.lineTo(x, y);
+                        if (idx === 0) miniCtx.moveTo(x, y);
+                        else miniCtx.lineTo(x, y);
                     });
                 });
             });
         }
     });
 
-    ctx.stroke();
+    miniCtx.stroke();
     // --- マーカー描画 ---
     if (markerLon !== null && markerLat !== null) {
 
@@ -1033,12 +1033,12 @@ function drawMap() {
         const drawX = mapOffsetX + sx * mapScale;
         const drawY = mapOffsetY + sy * mapScale;
 
-        ctx.fillStyle = "red";
-        ctx.beginPath();
-        ctx.arc(drawX, drawY, 6, 0, Math.PI * 2);
-        ctx.fill();
+        miniCtx.fillStyle = "red";
+        miniCtx.beginPath();
+        miniCtx.arc(drawX, drawY, 6, 0, Math.PI * 2);
+        miniCtx.fill();
     }
-    ctx.restore();
+    miniCtx.restore();
 }
 /* ============================================================================
    地図ボタン押下時の処理
