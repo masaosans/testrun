@@ -1051,10 +1051,6 @@ mapButton.addEventListener("click", () => {
 
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
-    mapScaleGlobal = scale;
-    mapOffsetXGlobal = xOffset;
-    mapOffsetYGlobal = yOffset;
-
     const rect = miniMap.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
