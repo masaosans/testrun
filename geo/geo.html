@@ -1046,26 +1046,9 @@ miniMap.addEventListener("click", e => {
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    // drawMap() と同じ scale/xOffset/yOffset を計算
-    const cw = miniMap.width;
-    const ch = miniMap.height;
-    const lonRange = lonMax - lonMin;
-    const latRange = latMax - latMin;
-    const mapRatio = lonRange / latRange;
-    const canvasRatio = cw / ch;
-
-    let scale, xOffset=0, yOffset=0;
-    if(canvasRatio > mapRatio){
-        scale = ch / latRange;
-        xOffset = (cw - scale * lonRange)/2;
-    } else {
-        scale = cw / lonRange;
-        yOffset = (ch - scale * latRange)/2;
-    }
-
-    // タップ座標 → 緯度経度
-    const lon = lonMin + (clickX - xOffset) / scale;
-    const lat = latMax - (clickY - yOffset) / scale;
+    // 現在の mapScale / mapOffset を使用
+    const lon = lonMin + (clickX - mapOffsetX) / mapScale;
+    const lat = latMax - (clickY - mapOffsetY) / mapScale;
 
     // マーカー座標を保存
     markerLon = lon;
