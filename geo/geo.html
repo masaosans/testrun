@@ -947,12 +947,6 @@ let pinchCenterY = 0;
 let markerLon = null;
 let markerLat = null;
 
-//miniMapのタップ位置計算用
-// グローバルに追加
-let mapScaleGlobal = 1;
-let mapOffsetXGlobal = 0;
-let mapOffsetYGlobal = 0;
-
 /* ============================================================================
    線画での地図描画（描画処理）
    ============================================================================ */
@@ -979,10 +973,6 @@ function drawMap() {
         scale = cw / lonRange;
         yOffset = (ch - scale * latRange)/2;
     }
-    //タップ位置の獲得用に保存
-    mapScaleGlobal = scale;
-    mapOffsetXGlobal = xOffset;
-    mapOffsetYGlobal = yOffset;
 
     miniCtx.strokeStyle = "#333";
     miniCtx.lineWidth = 1 / mapScale; // 線の太さ補正
@@ -1056,8 +1046,8 @@ miniMap.addEventListener("click", e => {
     const clickY = e.clientY - rect.top;
 
     // 保存した scale / offset を使って正確に変換
-    const lon = lonMin + (clickX - mapOffsetXGlobal) / mapScaleGlobal;
-    const lat = latMax - (clickY - mapOffsetYGlobal) / mapScaleGlobal;
+    const lon = lonMin + (clickX - mapOffsetX) / mapScale;
+    const lat = latMax - (clickY - mapOffsetY) / mapScale;
 
     markerLon = lon;
     markerLat = lat;
