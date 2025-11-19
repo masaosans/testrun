@@ -35,7 +35,7 @@ body{
   box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* 軽い影 */
   cursor: pointer;
   transition: all 0.2s ease;  /* ホバー時のアニメーション */
-  z-index: 100;　/* ミニマップより上に */
+  z-index: 100; /* ミニマップより上に */
 }
 
 /* ホバー時 */
@@ -933,6 +933,15 @@ let pinchCenterY = 0;
 let markerLon = null;
 let markerLat = null;
 
+//地図全体のメルカトル境界計算用
+const mNW = lonLatToMercator(lonMin, latMax);
+const mSE = lonLatToMercator(lonMax, latMin);
+
+const mercLonMin = mNW.x;
+const mercLatMax = mNW.y;
+const mercLonMax = mSE.x;
+const mercLatMin = mSE.y;
+
 /* ============================================================================
    線画での地図描画（描画処理）
    ============================================================================ */
@@ -967,12 +976,16 @@ function drawMap() {
 
     geoData.features.forEach(feature => {
         const coordsArray = feature.geometry.coordinates;
+
         coordsArray.forEach(polygon => {
             polygon.forEach(ring => {
                 ring.forEach((pt, i) => {
-                    const x = xOffset + (pt[0]-lonMin) * scale; // ← scale を使用
-                    const y = yOffset + (latMax-pt[1]) * scale; // ← scale を使用
-                    if(i===0) ctx.moveTo(x, y);
+                    const m = lonLatToMercator(pt[0], pt[1]);
+
+                    const x = xOffset + (m.x - mercLonMin) * scale;
+                    const y = yOffset + (mercLatMax - m.y) * scale;
+
+                    if(i === 0) ctx.moveTo(x, y);
                     else ctx.lineTo(x, y);
                 });
             });
@@ -1103,6 +1116,16 @@ miniMap.addEventListener('touchmove', e => {
         drawMap();
     }
 }, { passive: false });
+
+
+/* ===============================
+   メルカトル変換関数
+================================ */
+function lonLatToMercator(lon, lat){
+    const x = lon;
+    const y = Math.log(Math.tan(Math.PI/4 + (lat*Math.PI/180)/2)) * (180/Math.PI);
+    return {x, y};
+}
 
 /* ===============================
    レスポンシブ対応
