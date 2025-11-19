@@ -1016,7 +1016,7 @@ function drawMap() {
         const drawX = mapOffsetX + sx;
         const drawY = mapOffsetY + sy;
 
-        ctx.fillStyle = "red";
+        miniCtx.fillStyle = "red";
         miniCtx.beginPath();
         miniCtx.arc(drawX, drawY, 6 / mapScale, 0, Math.PI * 2); // 拡大縮小時にサイズも補正
         miniCtx.fill();
