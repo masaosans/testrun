@@ -1051,24 +1051,6 @@ mapButton.addEventListener("click", () => {
 
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
-
-    const cw = miniMap.width;
-    const ch = miniMap.height;
-
-    const lonRange = lonMax - lonMin;
-    const latRange = latMax - latMin;
-    const mapRatio = lonRange / latRange;
-    const canvasRatio = cw / ch;
-
-    let scale, xOffset=0, yOffset=0;
-    if(canvasRatio > mapRatio){
-        scale = ch / latRange;
-        xOffset = (cw - scale * lonRange)/2;
-    } else {
-        scale = cw / lonRange;
-        yOffset = (ch - scale * latRange)/2;
-    }
-
     mapScaleGlobal = scale;
     mapOffsetXGlobal = xOffset;
     mapOffsetYGlobal = yOffset;
