@@ -1132,8 +1132,10 @@ miniMap.addEventListener('touchmove', e => {
         lastDistance = distance;
 
         // ピンチ中心に合わせてオフセット補正
-        mapOffsetX = pinchCenterX - (pinchCenterX - mapOffsetX) * scaleChange;
-        mapOffsetY = pinchCenterY - (pinchCenterY - mapOffsetY) * scaleChange;
+        // mapOffsetX = pinchCenterX - (pinchCenterX - mapOffsetX) * scaleChange;
+        // mapOffsetY = pinchCenterY - (pinchCenterY - mapOffsetY) * scaleChange;
+        mapOffsetX = (mapOffsetX - pinchCenterX) * scaleChange + pinchCenterX;
+        mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
 
         mapScale *= scaleChange;
         mapScale = Math.min(Math.max(mapScale, 0.5), 5);
