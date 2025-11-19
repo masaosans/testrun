@@ -952,7 +952,6 @@ let markerLat = null;
    ============================================================================ */
 function drawMap() {
     if(!geoData) return;
-
     miniCtx.clearRect(0, 0, miniMap.width, miniMap.height);
     miniCtx.save();
     miniCtx.translate(mapOffsetX, mapOffsetY); // オフセット反映
@@ -1042,21 +1041,43 @@ mapButton.addEventListener("click", () => {
 
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
+
+    const cw = miniMap.width;
+    const ch = miniMap.height;
+
+    const lonRange = lonMax - lonMin;
+    const latRange = latMax - latMin;
+    const mapRatio = lonRange / latRange;
+    const canvasRatio = cw / ch;
+
+    let scale, xOffset=0, yOffset=0;
+    if(canvasRatio > mapRatio){
+        scale = ch / latRange;
+        xOffset = (cw - scale * lonRange)/2;
+    } else {
+        scale = cw / lonRange;
+        yOffset = (ch - scale * latRange)/2;
+    }
+    mapScaleGlobal = scale;
+    mapOffsetXGlobal = xOffset;
+    mapOffsetYGlobal = yOffset;
+
+   
     const rect = miniMap.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    // 現在の mapScale / mapOffset を使用
-    const lon = lonMin + (clickX - mapOffsetX) / mapScale;
-    const lat = latMax - (clickY - mapOffsetY) / mapScale;
+    // 保存した scale / offset を使って正確に変換
+    const lon = lonMin + (clickX - mapOffsetXGlobal) / mapScaleGlobal;
+    const lat = latMax - (clickY - mapOffsetYGlobal) / mapScaleGlobal;
 
-    // マーカー座標を保存
     markerLon = lon;
     markerLat = lat;
 
-    // カメラ位置を Three.js ワールド座標に変換
+    // Three.js ワールド座標に変換
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
+
     camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
     controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
@@ -1065,7 +1086,6 @@ miniMap.addEventListener("click", e => {
     drawMap();
     miniMap.style.display = "none";
 });
-
 /* ============================================================================
    マップのオブジェクトのみスワイプ拡大
    ============================================================================ */
