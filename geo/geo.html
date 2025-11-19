@@ -56,6 +56,8 @@ body{
   position: absolute;
   top: 0;
   left: 0;
+  width: 100vw;   /* ← 追加：画面幅いっぱい */
+  height: 100vh;  /* ← 追加：画面高さいっぱい */
   z-index: 50;
   display: none;
   background: rgba(255, 255, 255, 0.9);
@@ -1032,6 +1034,11 @@ function drawMap() {
 const mapButton = document.getElementById("mapButton");
 mapButton.addEventListener("click", () => {
     miniMap.style.display = miniMap.style.display === "none" ? "block" : "none";
+        // キャンバスの内部解像度も画面いっぱいに合わせる
+    miniMap.width  = window.innerWidth;
+    miniMap.height = window.innerHeight;
+
+    drawMiniMap(); // ← ここであなたの minimap 描画関数を呼ぶ
 });
 
 
