@@ -1009,34 +1009,17 @@ function drawMap() {
     miniCtx.stroke();
     // --- マーカー描画 ---
     if (markerLon !== null && markerLat !== null) {
+        // 緯度経度 → 地図上座標
+        const sx = (markerLon - lonMin) / (lonMax - lonMin) * (lonMax - lonMin) * scale; // sxを地図座標に
+        const sy = (latMax - markerLat) / (latMax - latMin) * (latMax - latMin) * scale;
 
-        const cw = miniMap.width;
-        const ch = miniMap.height;
+        const drawX = mapOffsetX + sx;
+        const drawY = mapOffsetY + sy;
 
-        const lonRange = lonMax - lonMin;
-        const latRange = latMax - latMin;
-        const mapRatio = lonRange / latRange;
-        const canvasRatio = cw / ch;
-
-        let scale, xOffset=0, yOffset=0;
-        if(canvasRatio > mapRatio){
-            scale = ch / latRange;
-            xOffset = (cw - scale * lonRange)/2;
-        } else {
-            scale = cw / lonRange;
-            yOffset = (ch - scale * latRange)/2;
-        }
-
-        const sx = xOffset + (markerLon - lonMin) * scale;
-        const sy = yOffset + (latMax - markerLat) * scale;
-
-        const drawX = mapOffsetX + sx * mapScale;
-        const drawY = mapOffsetY + sy * mapScale;
-
-        miniCtx.fillStyle = "red";
-        miniCtx.beginPath();
-        miniCtx.arc(drawX, drawY, 6, 0, Math.PI * 2);
-        miniCtx.fill();
+        ctx.fillStyle = "red";
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, 6 / mapScale, 0, Math.PI * 2); // 拡大縮小時にサイズも補正
+        ctx.fill();
     }
     miniCtx.restore();
 }
