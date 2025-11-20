@@ -1168,7 +1168,7 @@ miniMap.addEventListener('touchmove', e => {
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
 
         mapScale *= scaleChange;
-        mapScale = Math.min(Math.max(mapScale, 0.5), 50);//mapの最大、最小サイズ
+        mapScale = Math.min(Math.max(mapScale, 0.5), 100);//mapの最大、最小サイズ
 
         drawMap();
     }
