@@ -451,21 +451,34 @@ function createExtrudeMeshFromWay(el){
     const centerY = (minY + maxY) / 2;
     geo.translate(0, -centerY, 0);
 
+
+    // ★ 建物名があるか？
+    const hasName =
+        tags.name &&
+        tags.name.trim() !== "" &&
+        tags.name !== null &&
+        tags.name !== undefined;
+
+    // ★ 色分け
+    const colorSet = hasName ? 0x999999 : 0xaa4444;
+    // 例：
+    // ・名前あり = 濃ゆい灰色系
+    // ・名前なし = 灰色系
     // 壁材（写真などに変えればリアル化可能）
-    const mat = new THREE.MeshPhongMaterial({
-        map: windowTex,
-        color:0x999999
-    });
+    //const mat = new THREE.MeshPhongMaterial({
+    //    map: windowTex,
+    //    color:0x999999
+    //});
 
     //追加
     const wallMaterial = new THREE.MeshStandardMaterial({
-        color: 0x999999, // 明るい壁色
+        color: colorSet, // 明るい壁色
         roughness: 0.9,
         metalness: 0.0
     });
 
     const roofMaterial = new THREE.MeshStandardMaterial({
-        color: 0x999999, // 明るい屋根色
+        color: colorSet, // 明るい屋根色
         roughness: 0.9,
         metalness: 0.0
     });
