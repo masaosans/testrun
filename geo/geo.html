@@ -1021,6 +1021,34 @@ function drawMap() {
 
     miniCtx.stroke();
 
+    // ---- ★ ラベル描画 ★ ----
+    geoData.features.forEach(feature => {
+        const geom = feature.geometry;
+        let coords = [];
+
+        if (geom.type === "Polygon") coords = geom.coordinates[0];
+        else if (geom.type === "MultiPolygon") coords = geom.coordinates[0][0];
+
+        // 中心座標を計算
+        let sumX = 0, sumY = 0;
+        coords.forEach(pt => {
+            sumX += pt[0];
+            sumY += pt[1];
+        });
+        const cx = xOffset + ((sumX / coords.length) - lonMin) * baseScale;
+        const cy = yOffset + (latMax - (sumY / coords.length)) * baseScale;
+
+        // ラベル描画
+        const name = feature.properties?.name || feature.properties?.N03_004 || ""; // GeoJSON に応じて変更
+        if (name && mapScale > 2) { // ある程度拡大したときだけ表示
+            miniCtx.fillStyle = "black";
+            miniCtx.font = `${12 / mapScale}px sans-serif`;
+            miniCtx.textAlign = "center";
+            miniCtx.textBaseline = "middle";
+            miniCtx.fillText(name, cx, cy);
+        }
+    });
+
     // マーカー描画
     if (markerLon !== null && markerLat !== null) {
         const sx = xOffset + (markerLon - lonMin) * baseScale;
@@ -1140,7 +1168,7 @@ miniMap.addEventListener('touchmove', e => {
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
 
         mapScale *= scaleChange;
-        mapScale = Math.min(Math.max(mapScale, 0.5), 15);//mapの最大、最小サイズ
+        mapScale = Math.min(Math.max(mapScale, 0.5), 50);//mapの最大、最小サイズ
 
         drawMap();
     }
