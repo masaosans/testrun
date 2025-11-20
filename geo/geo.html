@@ -1199,6 +1199,17 @@ miniMap.addEventListener('touchend', e => {
 const mapButton = document.getElementById("mapButton");
 mapButton.addEventListener("click", () => {
     miniMap.style.display = miniMap.style.display === "none" ? "block" : "none";
+
+    // キャンバスの内部解像度を画面いっぱいに
+    const dpr = window.devicePixelRatio;
+    miniMap.width  = window.innerWidth  * dpr;
+    miniMap.height = window.innerHeight * dpr;
+
+    // ---- ★ ここでマーカーを現在地に置き換え ----
+    const pos = cameraToLonLat(camera.position.x, camera.position.z);
+    markerLon = pos.lon;
+    markerLat = pos.lat;
+
     drawMap();
 });
 
