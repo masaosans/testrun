@@ -930,7 +930,7 @@ let markerLat = null;
 let geoDataLow = null;   // ざっくり日本全体
 let geoDataHigh = null;  // 詳細（市区町村レベルなど）
 const geoUrlLow  = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
-const geoUrlHigh = "https://raw.githubusercontent.com/smartnews-smri/japan-topography/main/data/municipality/geojson/s0010/municipalities.geojson"; // 例
+const geoUrlHigh = "https://raw.githubusercontent.com/smartnews-smri/japan-topography/main/data/municipality/geojson/s0010/N03-21_210101.json"; // 例
 
 // 低解像度GeoJSON
 fetch(geoUrlLow)
@@ -966,7 +966,7 @@ resizeCanvas();
 ============================================================================ */
 function drawMap() {
     // 適切なレイヤーを選択
-    const geoData = mapScale < 5 ? geoDataLow : geoDataHigh;
+    const geoData = mapScale < 7 ? geoDataLow : geoDataHigh;
 
     if (!geoData) return;
 
