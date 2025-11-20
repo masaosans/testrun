@@ -1176,20 +1176,25 @@ miniMap.addEventListener('touchmove', e => {
 miniMap.addEventListener('touchend', e => {
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
-    const t = e.touches[0];
 
-        if(e.touches.length === 0){
+    if(e.touches.length === 0){
         isDraggingMap = false;
         isPinching = false;
+
     } else if(e.touches.length === 1){
-        // 片方の指を離したら1本指ドラッグに切り替え
+        // 指が 1 本だけ残ったのでドラッグ開始に切り替え
+        const t = e.touches[0];
+
+        const touchX = (t.clientX - rect.left) * dpr;
+        const touchY = (t.clientY - rect.top) * dpr;
+
+        dragStartX = touchX - mapOffsetX;
+        dragStartY = touchY - mapOffsetY;
+
         isDraggingMap = true;
         isPinching = false;
-
-        dragStartX = (t.clientX - rect.left) * dpr - mapOffsetX;
-        dragStartY = (t.clientY - rect.top) * dpr - mapOffsetY;   }
+    }
 });
-
 
 /* ===============================
    レスポンシブ対応
