@@ -1194,21 +1194,19 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
 
-    // ミニマップのサイズ調整（幅の20%）
+    // ------ ★ minimap を全画面にする：ここが重要 ★ ------
     const miniMap = document.getElementById("miniMap");
-
-    // ミニマップの内部ピクセルを CSS と一致させる(スマホ時のずれ対策追加済み)
-    const cssW = window.innerWidth * 0.25;
-    const cssH = window.innerHeight * 0.25;
     const dpr = window.devicePixelRatio;
 
-    miniMap.style.width = cssW + "px";
-    miniMap.style.height = cssH + "px";
+    // CSS は画面いっぱい
+    miniMap.style.width = window.innerWidth + "px";
+    miniMap.style.height = window.innerHeight + "px";
 
-    miniMap.width = cssW * dpr;
-    miniMap.height = cssH * dpr;
+    // canvas 内部もピクセル単位でフルサイズ
+    miniMap.width  = window.innerWidth  * dpr;
+    miniMap.height = window.innerHeight * dpr;
 
-    // ジョイスティック（画面の15%）
+    // ------ joystick はそのまま ------
     const joy = document.getElementById("joystick-zone");
     const size = Math.max(window.innerWidth, window.innerHeight) * 0.12;
     joy.style.width = size + "px";
