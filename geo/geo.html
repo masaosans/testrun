@@ -885,13 +885,15 @@ window.addEventListener('resize', ()=>{
    キーボード：表示タイル半径の変更（+ / -）
    ============================================================================ */
 window.addEventListener('keydown', e=>{
-    if(e.key==="+"){
-        LOAD_RADIUS=Math.min(4,LOAD_RADIUS+1);
-    }
-    if(e.key==="-"){
-        LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1);
+    if (miniMap.style.display !== "block") {
+        //ミニマップ以外
+
+
+    } else {// minimap が表示中のみ
+
     }
 });
+
 
 
 /* フェッチキューの処理開始 */
@@ -1039,11 +1041,13 @@ mapButton.addEventListener("click", () => {
 
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
-    const rect = miniMap.getBoundingClientRect();
 
-    // クリック座標
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
+    const rect = miniMap.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+
+    // CSS → canvas内部座標へ変換
+    const clickX = (e.clientX - rect.left) * dpr;
+    const clickY = (e.clientY - rect.top) * dpr;
 
     // ミニマップ中央寄せや拡大縮小の補正
     const cw = miniMap.width;
@@ -1053,13 +1057,13 @@ miniMap.addEventListener("click", e => {
     const mapRatio = lonRange / latRange;
     const canvasRatio = cw / ch;
 
-    let scale, xOffset=0, yOffset=0;
+    let scale, xOffset = 0, yOffset = 0;
     if(canvasRatio > mapRatio){
         scale = ch / latRange;
-        xOffset = (cw - scale * lonRange)/2;
+        xOffset = (cw - scale * lonRange) / 2;
     } else {
         scale = cw / lonRange;
-        yOffset = (ch - scale * latRange)/2;
+        yOffset = (ch - scale * latRange) / 2;
     }
 
     // 実際のクリック位置から経度緯度へ
@@ -1069,12 +1073,20 @@ miniMap.addEventListener("click", e => {
     markerLon = lon;
     markerLat = lat;
 
-    // Three.js ワールド座標に変換
+    // Three.js ワールド座標へ
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
 
-    camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
-    controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
+    camera.position.set(
+        m.x - ORIGIN_M.x,
+        cameraHeight,
+        -(m.y - ORIGIN_M.y)
+    );
+    controls.target.set(
+        m.x - ORIGIN_M.x,
+        0,
+        -(m.y - ORIGIN_M.y)
+    );
     controls.update();
 
     updateTilesAroundCamera();
@@ -1092,32 +1104,45 @@ let dragStartX = 0;
 let dragStartY = 0;
 
 miniMap.addEventListener('touchstart', e => {
+    const rect = miniMap.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    const t = e.touches[0];
+
     if(e.touches.length === 1){
         // 1本指でドラッグ開始
-        isDraggingMap = true;
-        dragStartX = e.touches[0].clientX - mapOffsetX;
-        dragStartY = e.touches[0].clientY - mapOffsetY;
+       isDraggingMap = true;
+        const t = e.touches[0];
+        dragStartX = (t.clientX - rect.left) * dpr - mapOffsetX;
+        dragStartY = (t.clientY - rect.top) * dpr - mapOffsetY;
         isPinching = false;
+
     } else if(e.touches.length === 2){
         // 2本指でピンチ開始
         isPinching = true;
         isDraggingMap = false;
 
+        
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         lastDistance = Math.hypot(dx, dy);
 
-        pinchCenterX = (e.touches[0].clientX + e.touches[1].clientX)/2;
-        pinchCenterY = (e.touches[0].clientY + e.touches[1].clientY)/2;
+        pinchCenterX = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left) * dpr;
+        pinchCenterY = ((e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top) * dpr;
     }
 }, { passive: false });
 
 miniMap.addEventListener('touchmove', e => {
+    const rect = miniMap.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+
     if(isDraggingMap && e.touches.length === 1){
         e.preventDefault();
-        const touch = e.touches[0];
-        mapOffsetX = touch.clientX - dragStartX;
-        mapOffsetY = touch.clientY - dragStartY;
+        const t = e.touches[0];
+        const touchX = (t.clientX - rect.left) * dpr;
+        const touchY = (t.clientY - rect.top) * dpr;
+
+        mapOffsetX = touchX - dragStartX;
+        mapOffsetY = touchY - dragStartY;
 
         drawMap();
     } else if(isPinching && e.touches.length === 2){
@@ -1134,7 +1159,7 @@ miniMap.addEventListener('touchmove', e => {
         // mapOffsetY = pinchCenterY - (pinchCenterY - mapOffsetY) * scaleChange;
         mapOffsetX = (mapOffsetX - pinchCenterX) * scaleChange + pinchCenterX;
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
-
+        
         mapScale *= scaleChange;
         mapScale = Math.min(Math.max(mapScale, 0.5), 5);
 
@@ -1143,16 +1168,20 @@ miniMap.addEventListener('touchmove', e => {
 }, { passive: false });
 
 miniMap.addEventListener('touchend', e => {
-    if(e.touches.length === 0){
+    const rect = miniMap.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    const t = e.touches[0];
+
+        if(e.touches.length === 0){
         isDraggingMap = false;
         isPinching = false;
     } else if(e.touches.length === 1){
         // 片方の指を離したら1本指ドラッグに切り替え
         isDraggingMap = true;
         isPinching = false;
-        dragStartX = e.touches[0].clientX - mapOffsetX;
-        dragStartY = e.touches[0].clientY - mapOffsetY;
-    }
+
+        dragStartX = (t.clientX - rect.left) * dpr - mapOffsetX;
+        dragStartY = (t.clientY - rect.top) * dpr - mapOffsetY;   }
 });
 
 
@@ -1167,8 +1196,17 @@ function onWindowResize() {
 
     // ミニマップのサイズ調整（幅の20%）
     const miniMap = document.getElementById("miniMap");
-    miniMap.width = window.innerWidth * 0.25;
-    miniMap.height = window.innerHeight * 0.25;
+
+    // ミニマップの内部ピクセルを CSS と一致させる(スマホ時のずれ対策追加済み)
+    const cssW = window.innerWidth * 0.25;
+    const cssH = window.innerHeight * 0.25;
+    const dpr = window.devicePixelRatio;
+
+    miniMap.style.width = cssW + "px";
+    miniMap.style.height = cssH + "px";
+
+    miniMap.width = cssW * dpr;
+    miniMap.height = cssH * dpr;
 
     // ジョイスティック（画面の15%）
     const joy = document.getElementById("joystick-zone");
