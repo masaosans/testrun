@@ -41,6 +41,36 @@ body{
   transform: translateY(0);
 }
 
+#currentLocationButton {
+  position: absolute;
+  top: 40px;
+  left: 15px;
+  padding: 12px 24px;         /* ボタンサイズ */
+  font-size: 16px;            /* 文字サイズ */
+  font-weight: 600;
+  color: #ffffff;             /* 文字色 */
+  background-color: #4CAF50;  /* 緑色 */
+  border: none;               /* 枠線なし */
+  border-radius: 8px;         /* 角丸 */
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* 軽い影 */
+  cursor: pointer;
+  transition: all 0.2s ease;  /* ホバー時のアニメーション */
+  z-index: 30; /* ミニマップより下に */
+}
+
+/* ホバー時 */
+#currentLocationButton:hover {
+  background-color: #45a049;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  transform: translateY(-2px); /* 少し浮く */
+}
+
+/* タッチ端末でも押しやすく */
+#currentLocationButton:active {
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  transform: translateY(0);
+}
+
 /* ミニマップ */
 #miniMap {
   position: absolute;
@@ -78,6 +108,7 @@ body{
 </div>
 <div id="cameraPos">Lat: 0, Lon: 0</div>
 <button id="mapButton">日本地図</button>
+<button id="currentLocationButton">現在地</button>
 <canvas id="miniMap"></canvas>
 <div id="joystick-zone"></div>
 
@@ -1168,7 +1199,7 @@ miniMap.addEventListener('touchmove', e => {
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
 
         mapScale *= scaleChange;
-        mapScale = Math.min(Math.max(mapScale, 0.5), 100);//mapの最大、最小サイズ
+        mapScale = Math.min(Math.max(mapScale, 0.5), 300);//mapの最大、最小サイズ
 
         drawMap();
     }
@@ -1243,6 +1274,52 @@ function onWindowResize() {
 
 window.addEventListener("resize", onWindowResize);
 onWindowResize();
+
+/* ===============================
+   現在地ボタン
+================================ */
+const currentLocationButton = document.getElementById("currentLocationButton");
+
+currentLocationButton.addEventListener("click", () => {
+    if (!navigator.geolocation) {
+        alert("このブラウザでは位置情報が取得できません。");
+        return;
+    }
+
+    // 現在地取得
+    navigator.geolocation.getCurrentPosition(
+        (position) => {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+
+            // Three.js ワールド座標に変換
+            const m = lonLatToMerc(lon, lat);
+            const cameraHeight = camera.position.y;
+
+            camera.position.set(
+                m.x - ORIGIN_M.x,
+                cameraHeight,
+                -(m.y - ORIGIN_M.y)
+            );
+            controls.target.set(
+                m.x - ORIGIN_M.x,
+                0,
+                -(m.y - ORIGIN_M.y)
+            );
+            controls.update();
+
+            drawMap(); // ミニマップにマーカーを反映
+        },
+        (error) => {
+            alert("現在地の取得に失敗しました: " + error.message);
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 5000,
+            maximumAge: 0
+        }
+    );
+});
 
 </script>
 </body>
