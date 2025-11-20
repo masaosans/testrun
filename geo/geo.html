@@ -923,14 +923,29 @@ let pinchCenterY = 0;
 let markerLon = null;
 let markerLat = null;
 
-// GeoJSON 読み込み
-const geoUrl = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
-fetch(geoUrl)
-    .then(res => res.json())
-    .then(json => {
-        geoData = json;
-        drawMap();
-    });
+
+ /* ===============================
+   GeoJSONデータの読み込み
+   =============================== */
+let geoDataLow = null;   // ざっくり日本全体
+let geoDataHigh = null;  // 詳細（市区町村レベルなど）
+const geoUrlLow  = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
+const geoUrlHigh = "https://raw.githubusercontent.com/dataofjapan/land/master/japan_prefectures.geojson"; // 例
+
+// 低解像度GeoJSON
+fetch(geoUrlLow)
+  .then(res => res.json())
+  .then(json => {
+      geoDataLow = json;
+      drawMap();
+  });
+
+// 高解像度GeoJSON
+fetch(geoUrlHigh)
+  .then(res => res.json())
+  .then(json => {
+      geoDataHigh = json;
+  });
 
 /* ============================================================================
 // Canvas サイズ更新（全画面対応）
@@ -950,6 +965,9 @@ resizeCanvas();
 // 線画での地図描画
 ============================================================================ */
 function drawMap() {
+    // 適切なレイヤーを選択
+    const geoData = mapScale < 3 ? geoDataLow : geoDataHigh;
+
     if (!geoData) return;
 
     miniCtx.clearRect(0, 0, miniMap.width, miniMap.height);
@@ -1122,7 +1140,7 @@ miniMap.addEventListener('touchmove', e => {
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
 
         mapScale *= scaleChange;
-        mapScale = Math.min(Math.max(mapScale, 0.5), 5);
+        mapScale = Math.min(Math.max(mapScale, 0.5), 15);//mapの最大、最小サイズ
 
         drawMap();
     }
