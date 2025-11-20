@@ -887,11 +887,9 @@ window.addEventListener('resize', ()=>{
 window.addEventListener('keydown', e=>{
     if(e.key==="+"){
         LOAD_RADIUS=Math.min(4,LOAD_RADIUS+1);
-        document.getElementById('rad').textContent=LOAD_RADIUS;
     }
     if(e.key==="-"){
         LOAD_RADIUS=Math.max(0,LOAD_RADIUS-1);
-        document.getElementById('rad').textContent=LOAD_RADIUS;
     }
 });
 
