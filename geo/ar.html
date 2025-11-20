@@ -3,26 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple WebXR AR</title>
+    <title>WebXR Test</title>
     <style>
-        body { margin: 0; padding: 20px; font-family: Arial; background: #222; color: white; text-align: center; }
-        button { padding: 15px 30px; margin: 10px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
+        body { margin: 0; padding: 20px; font-family: Arial; background: #000; color: white; text-align: center; }
+        button { padding: 12px 24px; margin: 5px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
         #startBtn { background: #4CAF50; color: white; }
         #stopBtn { background: #f44336; color: white; }
-        #moveBtn { background: #2196F3; color: white; }
-        #arView { width: 100%; height: 400px; background: black; margin: 20px 0; display: none; }
+        #arView { width: 100%; height: 60vh; background: #111; margin: 10px 0; display: none; }
         #arView.active { display: block; }
-        #info { margin: 10px; padding: 10px; background: #333; border-radius: 5px; }
+        #info { margin: 10px; padding: 10px; background: #333; border-radius: 5px; min-height: 20px; }
     </style>
 </head>
 <body>
-    <h1>Simple WebXR AR</h1>
-    <div id="info">ARを開始してください</div>
-    <div>
-        <button id="startBtn" onclick="startAR()">AR開始</button>
-        <button id="stopBtn" onclick="stopAR()" disabled>停止</button>
-        <button id="moveBtn" onclick="moveCube()" disabled>立方体を近づける</button>
-    </div>
+    <h1>WebXR Test</h1>
+    <div id="info">Ready</div>
+    <button id="startBtn" onclick="startAR()">Start AR</button>
+    <button id="stopBtn" onclick="stopAR()" disabled>Stop</button>
     <div id="arView">
         <canvas id="arCanvas"></canvas>
     </div>
@@ -30,135 +26,169 @@
     <script>
         let session = null;
         let gl = null;
-        let cubeDistance = -2.0;
+
+        function log(msg) {
+            document.getElementById('info').textContent = msg;
+            console.log(msg);
+        }
 
         async function startAR() {
-            if (!navigator.xr) {
-                showInfo('WebXR非対応');
-                return;
-            }
-
             try {
+                if (!navigator.xr) {
+                    log('WebXR not supported');
+                    return;
+                }
+
+                // ARセッション開始
                 session = await navigator.xr.requestSession('immersive-ar');
-                showInfo('AR開始成功');
+                log('AR session started');
                 
                 const canvas = document.getElementById('arCanvas');
-                setupWebGL(canvas);
+                const ctx = canvas.getContext('webgl', { 
+                    xrCompatible: true,
+                    alpha: false,
+                    depth: true
+                });
                 
-                const glLayer = new XRWebGLLayer(session, gl);
-                await session.updateRenderState({ baseLayer: glLayer });
+                if (!ctx) {
+                    log('WebGL failed');
+                    return;
+                }
+                
+                gl = ctx;
+                
+                // キャンバスサイズ設定
+                canvas.width = canvas.clientWidth * window.devicePixelRatio;
+                canvas.height = canvas.clientHeight * window.devicePixelRatio;
+                
+                // WebGL基本設定
+                gl.enable(gl.DEPTH_TEST);
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                
+                // XRレイヤー設定
+                const layer = new XRWebGLLayer(session, gl);
+                await session.updateRenderState({ baseLayer: layer });
+                
+                // 参照空間取得
+                const refSpace = await session.requestReferenceSpace('local');
                 
                 document.getElementById('arView').classList.add('active');
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('stopBtn').disabled = false;
-                document.getElementById('moveBtn').disabled = false;
                 
-                startRendering();
+                // レンダリング開始
+                session.requestAnimationFrame(onXRFrame);
                 
             } catch (error) {
-                showInfo('エラー: ' + error.message);
+                log('Error: ' + error.message);
             }
         }
 
-        function setupWebGL(canvas) {
-            canvas.width = canvas.clientWidth;
-            canvas.height = canvas.clientHeight;
+        function onXRFrame(time, frame) {
+            if (!session) return;
             
-            gl = canvas.getContext('webgl', { xrCompatible: true });
-            gl.enable(gl.DEPTH_TEST);
-            gl.clearColor(0, 0, 0, 0);
-        }
-
-        function startRendering() {
-            const renderLoop = (time, frame) => {
-                if (!session) return;
-                
-                const pose = frame.getViewerPose(session.renderState.referenceSpace);
-                const glLayer = session.renderState.baseLayer;
-                
-                gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-                
-                if (pose) {
-                    pose.views.forEach(view => {
-                        if (view.viewport) {
-                            gl.viewport(view.viewport.x, view.viewport.y, view.viewport.width, view.viewport.height);
-                            drawCube(view, time);
-                        }
-                    });
+            const refSpace = session.renderState.referenceSpace;
+            const pose = frame.getViewerPose(refSpace);
+            const layer = session.renderState.baseLayer;
+            
+            // フレームバッファをバインド
+            gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+            
+            // 画面をクリア（グレーにして確認）
+            gl.clearColor(0.3, 0.3, 0.3, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            
+            if (pose) {
+                // 各ビュー（目）を描画
+                for (const view of pose.views) {
+                    const viewport = view.viewport;
+                    gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+                    
+                    // シンプルな色付き三角形を描画（テスト用）
+                    drawTestTriangle(view);
                 }
-                
-                session.requestAnimationFrame(renderLoop);
-            };
+            }
             
-            session.requestAnimationFrame(renderLoop);
+            // 次のフレームをリクエスト
+            session.requestAnimationFrame(onXRFrame);
         }
 
-        function drawCube(view, time) {
-            // シンプルな立方体の描画
+        function drawTestTriangle(view) {
+            // 超シンプルな三角形
             const vertices = new Float32Array([
-                -0.3, -0.3,  0.3,  0.5, -0.3,  0.3,  0.5,  0.5,  0.3, -0.3,  0.5,  0.3, // 前面
-                -0.3, -0.3, -0.3, -0.3,  0.5, -0.3,  0.5,  0.5, -0.3,  0.5, -0.3, -0.3, // 背面
+                0.0,  0.5, 0.0,
+               -0.5, -0.5, 0.0,
+                0.5, -0.5, 0.0
             ]);
             
             const colors = new Float32Array([
-                1,0,0,1, 1,0,0,1, 1,0,0,1, 1,0,0,1, // 前面(赤)
-                0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1, // 背面(緑)
+                1.0, 0.0, 0.0, 1.0,  // 赤
+                0.0, 1.0, 0.0, 1.0,  // 緑  
+                0.0, 0.0, 1.0, 1.0   // 青
             ]);
             
-            const indices = new Uint16Array([0,1,2,0,2,3,4,5,6,4,6,7]);
+            // シェーダープログラム作成
+            const vsSource = `
+                attribute vec3 aPosition;
+                attribute vec4 aColor;
+                uniform mat4 uProjection;
+                uniform mat4 uView;
+                varying vec4 vColor;
+                void main() {
+                    gl_Position = uProjection * uView * vec4(aPosition, 1.0);
+                    vColor = aColor;
+                }
+            `;
             
-            // バッファ設定
+            const fsSource = `
+                precision mediump float;
+                varying vec4 vColor;
+                void main() {
+                    gl_FragColor = vColor;
+                }
+            `;
+            
+            const program = createShaderProgram(vsSource, fsSource);
+            gl.useProgram(program);
+            
+            // 頂点バッファ
             const positionBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
             
+            const positionLoc = gl.getAttribLocation(program, 'aPosition');
+            gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(positionLoc);
+            
+            // カラーバッファ
             const colorBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
             
-            const indexBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-            
-            // シンプルなシェーダー
-            const vs = `attribute vec4 position; attribute vec4 color; uniform mat4 proj; uniform mat4 model; varying vec4 vColor; void main() { gl_Position = proj * model * position; vColor = color; }`;
-            const fs = `varying vec4 vColor; void main() { gl_FragColor = vColor; }`;
-            
-            const program = createProgram(vs, fs);
-            gl.useProgram(program);
-            
-            // 属性設定
-            const positionLoc = gl.getAttribLocation(program, "position");
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0, 0);
-            gl.enableVertexAttribArray(positionLoc);
-            
-            const colorLoc = gl.getAttribLocation(program, "color");
-            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            const colorLoc = gl.getAttribLocation(program, 'aColor');
             gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(colorLoc);
             
-            // 行列設定
-            const rotation = time * 0.001;
-            const modelMatrix = [
-                Math.cos(rotation), 0, Math.sin(rotation), 0,
-                0, 1, 0, 0,
-                -Math.sin(rotation), 0, Math.cos(rotation), 0,
-                0, 0, cubeDistance, 1
-            ];
+            // 行列設定（シンプルに）
+            const projMatrix = view.projectionMatrix;
+            const viewMatrix = new Float32Array([
+                1,0,0,0,
+                0,1,0,0, 
+                0,0,1,0,
+                0,0,-2,1  // 2単位後ろに
+            ]);
             
-            const projLoc = gl.getUniformLocation(program, "proj");
-            const modelLoc = gl.getUniformLocation(program, "model");
+            const projLoc = gl.getUniformLocation(program, 'uProjection');
+            const viewLoc = gl.getUniformLocation(program, 'uView');
             
-            gl.uniformMatrix4fv(projLoc, false, view.projectionMatrix);
-            gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
+            gl.uniformMatrix4fv(projLoc, false, projMatrix);
+            gl.uniformMatrix4fv(viewLoc, false, viewMatrix);
             
             // 描画
-            gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
         }
 
-        function createProgram(vsSource, fsSource) {
+        function createShaderProgram(vsSource, fsSource) {
             const vertexShader = compileShader(gl.VERTEX_SHADER, vsSource);
             const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
             
@@ -167,6 +197,10 @@
             gl.attachShader(program, fragmentShader);
             gl.linkProgram(program);
             
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                log('Shader error');
+            }
+            
             return program;
         }
 
@@ -174,13 +208,14 @@
             const shader = gl.createShader(type);
             gl.shaderSource(shader, source);
             gl.compileShader(shader);
+            
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                log('Shader compile error');
+                gl.deleteShader(shader);
+                return null;
+            }
+            
             return shader;
-        }
-
-        function moveCube() {
-            cubeDistance += 0.5;
-            if (cubeDistance > -0.5) cubeDistance = -0.5;
-            showInfo('距離: ' + cubeDistance.toFixed(1) + 'm');
         }
 
         async function stopAR() {
@@ -191,21 +226,16 @@
             document.getElementById('arView').classList.remove('active');
             document.getElementById('startBtn').disabled = false;
             document.getElementById('stopBtn').disabled = true;
-            document.getElementById('moveBtn').disabled = true;
-            showInfo('AR停止');
-            cubeDistance = -2.0;
-        }
-
-        function showInfo(msg) {
-            document.getElementById('info').textContent = msg;
-            console.log(msg);
+            log('Stopped');
         }
 
         // 初期チェック
         if (navigator.xr) {
-            navigator.xr.isSessionSupported('immersive-ar').then(supported => {
-                if (!supported) showInfo('AR非対応デバイス');
-            });
+            navigator.xr.isSessionSupported('immersive-ar')
+                .then(supported => log(supported ? 'AR ready' : 'AR not supported'))
+                .catch(() => log('Check failed'));
+        } else {
+            log('WebXR not available');
         }
     </script>
 </body>
