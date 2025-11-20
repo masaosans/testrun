@@ -25,8 +25,13 @@
 
 <!-- ARButton -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/examples/jsm/webxr/ARButton.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vconsole/dist/vconsole.min.js"></script>
 
 <script>
+    
+const vConsole = new VConsole();
+
+    
     let camera, scene, renderer;
     let controller;
     let reticle;         // ヒットテスト用リング
