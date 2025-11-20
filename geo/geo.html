@@ -1041,39 +1041,44 @@ mapButton.addEventListener("click", () => {
 
 // ---- miniMap タップで移動＋マーカー設定 ----
 miniMap.addEventListener("click", e => {
-
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
 
-    // CSS → canvas内部座標へ変換
-    const clickX = (e.clientX - rect.left) * dpr;
-    const clickY = (e.clientY - rect.top) * dpr;
+    // CSS → canvas 内部座標
+    const tapX = (e.clientX - rect.left) * dpr;
+    const tapY = (e.clientY - rect.top) * dpr;
 
-    // ミニマップ中央寄せや拡大縮小の補正
+    // 現在の地図範囲
+    const lonRange = (lonMax - lonMin) / mapScale;
+    const latRange = (latMax - latMin) / mapScale;
+
+    // canvas 実サイズ
     const cw = miniMap.width;
     const ch = miniMap.height;
-    const lonRange = lonMax - lonMin;
-    const latRange = latMax - latMin;
+
+    // 表示比率に応じてフィットスケール決定
     const mapRatio = lonRange / latRange;
     const canvasRatio = cw / ch;
 
-    let scale, xOffset = 0, yOffset = 0;
-    if(canvasRatio > mapRatio){
+    let scale;
+    let xOffset = 0;
+    let yOffset = 0;
+
+    if (canvasRatio > mapRatio) {
+        // canvas が横長 → 上下ぴったり / 左右に余白
         scale = ch / latRange;
-        xOffset = (cw - scale * lonRange) / 2;
+        xOffset = (cw - lonRange * scale) / 2;
     } else {
+        // canvas が縦長 → 左右ぴったり / 上下に余白
         scale = cw / lonRange;
-        yOffset = (ch - scale * latRange) / 2;
+        yOffset = (ch - latRange * scale) / 2;
     }
 
-    // 実際のクリック位置から経度緯度へ
-    const lon = lonMin + (clickX - mapOffsetX - xOffset) / scale;
-    const lat = latMax - (clickY - mapOffsetY - yOffset) / scale;
+    // ---- ★最重要：mapOffsetX/Y を scale に組み込んで逆変換 ----
+    const lon = lonMin + (tapX - xOffset - mapOffsetX) / scale;
+    const lat = latMax - (tapY - yOffset - mapOffsetY) / scale;
 
-    markerLon = lon;
-    markerLat = lat;
-
-    // Three.js ワールド座標へ
+    // 移動処理
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
 
@@ -1087,10 +1092,11 @@ miniMap.addEventListener("click", e => {
         0,
         -(m.y - ORIGIN_M.y)
     );
-    controls.update();
 
+    controls.update();
     updateTilesAroundCamera();
     drawMap();
+
     miniMap.style.display = "none";
 });
 
