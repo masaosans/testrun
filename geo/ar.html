@@ -1,186 +1,390 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR AR Fixed</title>
-    <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: white; 
-            font-family: Arial; 
-            text-align: center;
-        }
-        #arCanvas {
-            width: 100vw;
-            height: 100vh;
-            display: none;
-            background: transparent !important;
-        }
-        button {
-            padding: 12px 20px;
-            font-size: 18px;
-            margin: 10px;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+  <title>WebXR Tap-to-Place GLB (Three.js + Anchors)</title>
+  <style>
+    html,body { height:100%; margin:0; background:#000; color:#fff; font-family:Arial, sans-serif; }
+    #ui { position: absolute; z-index: 10; left: 12px; top: 12px; }
+    button { padding:10px 14px; margin:6px; font-size:16px; border-radius:6px; border:0; cursor:pointer; }
+    #start { background:#2ecc71; color:#000; }
+    #stop  { background:#e74c3c; color:#000; }
+    #info { margin-top:8px; padding:8px 10px; background: rgba(0,0,0,0.5); border-radius:6px; font-size:14px; min-width:220px; }
+    canvas { width:100vw; height:100vh; display:block; background:transparent; }
+    #cross { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:18px; height:18px; pointer-events:none;
+            border-left:2px solid rgba(255,255,255,0.8); border-top:2px solid rgba(255,255,255,0.8);
+            border-right:2px solid rgba(255,255,255,0.25); border-bottom:2px solid rgba(255,255,255,0.25); border-radius:50%; mix-blend-mode:screen; }
+  </style>
 </head>
 <body>
+  <div id="ui">
+    <button id="start">Start AR</button>
+    <button id="stop" disabled>Stop AR</button>
+    <div id="info">Ready — Start to enter AR</div>
+  </div>
 
-<h1>WebXR AR Test</h1>
-<div id="info">Ready</div>
-<button onclick="startAR()">Start AR</button>
+  <div id="cross" aria-hidden="true"></div>
+  <canvas id="webgl-canvas"></canvas>
 
-<canvas id="arCanvas"></canvas>
+  <!-- Module imports from CDN (three.js + loaders) -->
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/GLTFLoader.js';
+    import { RGBELoader } from 'https://cdn.jsdelivr.net/npm/three@0.158.0/examples/jsm/loaders/RGBELoader.js';
 
-<script>
-let session = null;
-let gl = null;
-let refSpace = null;
+    const startBtn = document.getElementById('start');
+    const stopBtn  = document.getElementById('stop');
+    const infoEl   = document.getElementById('info');
+    const canvas   = document.getElementById('webgl-canvas');
 
-function log(msg) {
-    document.getElementById('info').textContent = msg;
-    console.log(msg);
-}
+    let renderer, scene, camera;
+    let xrSession = null;
+    let xrRefSpace = null;
+    let viewerRefSpace = null;
+    let hitTestSource = null;       // continuous hit-test (viewer center) for reticle
+    let placed = [];                // array of placed items: { object: THREE.Object3D, anchor: XRAnchor|null }
+    let gltfModel = null;           // loaded glTF model (clonable)
+    let reticle = null;             // placement reticle
+    let clock = new THREE.Clock();
 
-async function startAR() {
-    if (!navigator.xr) {
-        log("WebXR not supported");
+    // Free online GLB from Khronos glTF sample models (Duck)
+    const GLB_URL = 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Models@master/2.0/Duck/glTF-Binary/Duck.glb';
+
+    function log(msg) {
+      infoEl.textContent = msg;
+      console.log(msg);
+    }
+
+    // init three.js objects (not XR session dependant)
+    function initThree() {
+      renderer = new THREE.WebGLRenderer({
+        canvas: canvas,
+        antialias: true,
+        alpha: true,
+        preserveDrawingBuffer: false
+      });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.xr.enabled = true;
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 1000);
+
+      // lights
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+      hemi.position.set(0, 1, 0);
+      scene.add(hemi);
+
+      const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+      dir.position.set(0.5, 2, 0.5);
+      scene.add(dir);
+
+      // simple reticle: ring + dot
+      const ringGeo = new THREE.RingGeometry(0.07, 0.095, 32).rotateX(-Math.PI/2);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, opacity: 0.9, transparent: true });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+
+      const dotGeo = new THREE.CircleGeometry(0.03, 32).rotateX(-Math.PI/2);
+      const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      const dot = new THREE.Mesh(dotGeo, dotMat);
+      dot.position.y = 0.001;
+
+      reticle = new THREE.Group();
+      reticle.add(ring);
+      reticle.add(dot);
+      reticle.visible = false;
+      scene.add(reticle);
+
+      // handle resize
+      window.addEventListener('resize', () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      });
+    }
+
+    // load a GLB model (single file). We keep the loaded scene as a template to clone.
+    async function loadModel() {
+      log('Loading model...');
+      const loader = new GLTFLoader();
+      try {
+        const gltf = await loader.loadAsync(GLB_URL);
+        gltfModel = gltf.scene;
+        // normalize size a bit
+        const box = new THREE.Box3().setFromObject(gltfModel);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = maxDim > 0 ? (0.6 / maxDim) : 1.0; // scale model to ~60cm if big
+        gltfModel.scale.setScalar(scale);
+        gltfModel.traverse((c) => {
+          if (c.isMesh) {
+            c.castShadow = true;
+            c.receiveShadow = true;
+          }
+        });
+        log('Model loaded');
+      } catch (e) {
+        console.error('Model load error', e);
+        log('Model load failed: ' + e.message);
+      }
+    }
+
+    // create a clone of the loaded model (returns THREE.Object3D)
+    function createModelInstance() {
+      if (!gltfModel) {
+        const fallback = new THREE.Mesh(
+          new THREE.BoxGeometry(0.15,0.15,0.15),
+          new THREE.MeshStandardMaterial({ color: 0x8888ff })
+        );
+        fallback.castShadow = true;
+        return fallback;
+      }
+      return THREE.SceneUtils ? THREE.SceneUtils.clone(gltfModel) : gltfModel.clone(true);
+    }
+
+    // Start XR session manually to control required features (hit-test + anchors + camera-access)
+    async function startXR() {
+      if (!navigator.xr) {
+        log('WebXR not available on this device.');
         return;
-    }
+      }
 
-    try {
-        // ▼ 必須: camera-access / local / dom-overlay
-        session = await navigator.xr.requestSession("immersive-ar", {
-            requiredFeatures: ["camera-access", "local"],
-            optionalFeatures: ["dom-overlay"],
-            domOverlay: { root: document.body }
+      try {
+        // Required features: hit-test, anchors, camera-access; local refspace used for scene
+        xrSession = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['local', 'hit-test', 'anchors', 'camera-access'],
+          optionalFeatures: ['dom-overlay'],
+          domOverlay: { root: document.body }
         });
+      } catch (e) {
+        log('Failed to start AR session: ' + (e && e.message ? e.message : e));
+        return;
+      }
 
-        log("AR session started");
+      // set up renderer to use session
+      renderer.xr.setSession(xrSession);
 
-        const canvas = document.getElementById("arCanvas");
-        canvas.style.display = "block";
+      // reference spaces
+      xrRefSpace = await xrSession.requestReferenceSpace('local');
+      try {
+        viewerRefSpace = await xrSession.requestReferenceSpace('viewer');
+      } catch (e) {
+        viewerRefSpace = null;
+      }
 
-        // ▼ WebGL context（α必須）
-        gl = canvas.getContext("webgl", {
-            xrCompatible: true,
-            alpha: true
-        });
-
-        canvas.width = window.innerWidth * window.devicePixelRatio;
-        canvas.height = window.innerHeight * window.devicePixelRatio;
-
-        // ▼ XR layer（α必須）
-        const layer = new XRWebGLLayer(session, gl, { alpha: true });
-        session.updateRenderState({ baseLayer: layer });
-
-        refSpace = await session.requestReferenceSpace("local");
-
-        // 描画開始
-        session.requestAnimationFrame(onXRFrame);
-
-    } catch (err) {
-        log("Error: " + err.message);
-    }
-}
-
-function onXRFrame(t, frame) {
-    const layer = session.renderState.baseLayer;
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0.0, 0.0, 0.0, 0.0); // ▼ transparent
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    const pose = frame.getViewerPose(refSpace);
-
-    if (pose) {
-        for (const view of pose.views) {
-            const vp = layer.getViewport(view);
-            gl.viewport(vp.x, vp.y, vp.width, vp.height);
-
-            drawTriangle(view);
+      // continuous hit test source for showing reticle at screen center
+      if (viewerRefSpace) {
+        try {
+          hitTestSource = await xrSession.requestHitTestSource({ space: viewerRefSpace });
+        } catch (e) {
+          console.warn('requestHitTestSource failed:', e);
+          hitTestSource = null;
         }
+      }
+
+      // event listeners: select (tap)
+      xrSession.addEventListener('select', onSelect);
+
+      // cleanup on end
+      xrSession.addEventListener('end', onSessionEnd);
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      log('AR session started. Tap the screen to place the model.');
+
+      // start rendering loop via three.js (will call render)
+      renderer.setAnimationLoop(render);
     }
 
-    session.requestAnimationFrame(onXRFrame);
-}
+    // Select (tap) handler — place model at reticle location (and create anchor if supported)
+    async function onSelect(event) {
+      if (!reticle.visible) {
+        log('No placement surface found (reticle hidden). Move device to scan.');
+        return;
+      }
 
-// ▼ 超シンプルな三角形描画
-function drawTriangle(view) {
-    const vertices = new Float32Array([
-        0.0,  0.3, -1.0,
-       -0.3, -0.3, -1.0,
-        0.3, -0.3, -1.0
-    ]);
+      // create a model instance and attach to scene
+      const model = createModelInstance();
+      model.matrixAutoUpdate = false; // we'll control matrix from XR anchor/pose
+      scene.add(model);
 
-    const colors = new Float32Array([
-        1.0, 0.0, 0.0, 1.0,
-        0.0, 1.0, 0.0, 1.0,
-        0.0, 0.0, 1.0, 1.0
-    ]);
+      // If we have an XRFrame context accessible? event does not give frame here.
+      // We'll create an anchor from the last hit test result if possible.
+      // Safe approach: use hitTestSource and session.requestAnimationFrame to get the last pose.
+      // But WebXR provides hit-test results only inside frame callback. We'll attempt to:
+      //  - use hitTestSource and request a one-off hit test via frame in next animation frame.
+      // To simplify, we capture the reticle's world matrix as placement transform (Three.js matrix)
+      // and try to create an XRAnchor using xrSession.requestAnimationFrame context.
 
-    const vsSource = `
-        attribute vec3 aPosition;
-        attribute vec4 aColor;
-        uniform mat4 uProjection;
-        varying vec4 vColor;
-        void main() {
-            gl_Position = uProjection * vec4(aPosition, 1.0);
-            vColor = aColor;
+      // capture current reticle transform in three.js space (matrixWorld)
+      const mat = new THREE.Matrix4();
+      mat.copy(reticle.matrixWorld);
+      // set model matrix from reticle matrix
+      model.matrix.copy(mat);
+
+      // Try to create an XRAnchor anchored to the same pose:
+      // We need an XRFrame to call hitTestResult.createAnchor() or to session.requestAnimationFrame to get pose.
+      // The easiest cross-browser-compatible method is to:
+      // - Use a transient anchor via converting the reticle matrix to an XRTransform-like object and call session.requestAnimationFrame next frame to create an anchor from pose via anchor.create? But createAnchor is available on XRHitTestResult.
+      // Alternative practical method: call session.requestAnimationFrame once and use frame.createAnchor if available on session (some browsers have XRFrame.createAnchor).
+      // We'll attempt to call XRHitTestResult.createAnchor via a temporary hit test at the same center by using last hit test result stored in lastHitPose (maintained in render).
+      if (lastHitPoseForAnchor) {
+        // lastHitPoseForAnchor comes from last successful hit test (XRHitTestResult)
+        try {
+          if (lastHitResultForAnchor && typeof lastHitResultForAnchor.createAnchor === 'function') {
+            const anchor = await lastHitResultForAnchor.createAnchor();
+            // store placed item with anchor (we will update object's matrix each frame using anchor)
+            placed.push({ object: model, anchor });
+            log('Placed model with anchor (stable). Total placed: ' + placed.length);
+            return;
+          } else if (xrSession && typeof xrSession.requestAnchor === 'function') {
+            // some implementations expose requestAnchor (rare) — attempt conservative approach
+            try {
+              const xrAnchor = await xrSession.requestAnchor(lastHitPoseForAnchor.transform, xrRefSpace);
+              placed.push({ object: model, anchor: xrAnchor });
+              log('Placed model with session.requestAnchor.');
+              return;
+            } catch (e) { /* ignore and fallback */ }
+          }
+        } catch (e) {
+          console.warn('Anchor creation failed, falling back to non-anchored placement:', e);
         }
-    `;
+      }
 
-    const fsSource = `
-        precision mediump float;
-        varying vec4 vColor;
-        void main() {
-            gl_FragColor = vColor;
+      // Fallback: keep placed object without anchor (matrix is frozen)
+      placed.push({ object: model, anchor: null });
+      log('Placed model (no anchor). Total placed: ' + placed.length);
+    }
+
+    // Keep last good hitTestResult (for anchor creation on select)
+    let lastHitResultForAnchor = null;
+    let lastHitPoseForAnchor = null;
+
+    // render loop called by three.js
+    function render(time, xrFrame) {
+      // time may be undefined; we don't need clock here except for animations
+      const session = renderer.xr.getSession();
+      if (!session) return;
+
+      // get viewer pose
+      const referenceSpace = xrRefSpace;
+      const pose = xrFrame ? xrFrame.getViewerPose(referenceSpace) : null;
+
+      // update reticle by doing hitTestSource (viewer center)
+      if (hitTestSource && xrFrame) {
+        const hitResults = xrFrame.getHitTestResults(hitTestSource);
+        if (hitResults && hitResults.length > 0) {
+          // use first result
+          const hit = hitResults[0];
+          const hitPose = hit.getPose(referenceSpace);
+          if (hitPose) {
+            // set lastHit* for anchor attempts on select
+            lastHitResultForAnchor = hit;
+            lastHitPoseForAnchor = hitPose;
+
+            // convert pose transform matrix (Float32Array(16)) to THREE.Matrix4
+            const mat = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+            reticle.visible = true;
+            reticle.matrix.copy(mat);
+            reticle.matrix.decompose(reticle.position, reticle.quaternion, reticle.scale);
+          } else {
+            reticle.visible = false;
+            lastHitResultForAnchor = null;
+            lastHitPoseForAnchor = null;
+          }
+        } else {
+          reticle.visible = false;
+          lastHitResultForAnchor = null;
+          lastHitPoseForAnchor = null;
         }
-    `;
+      }
 
-    const prog = createProgram(vsSource, fsSource);
-    gl.useProgram(prog);
+      // Update placed objects that have anchors
+      if (xrFrame) {
+        for (let i = placed.length - 1; i >= 0; i--) {
+          const p = placed[i];
+          if (p.anchor) {
+            // anchor.anchorSpace used to get pose relative to xrRefSpace
+            try {
+              const anchorPose = xrFrame.getPose(p.anchor.anchorSpace, xrRefSpace);
+              if (anchorPose) {
+                const m = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
+                p.object.matrix.copy(m);
+                p.object.matrix.decompose(p.object.position, p.object.quaternion, p.object.scale);
+              }
+            } catch (e) {
+              // if anchor is lost or not supported, keep the object as-is
+              console.warn('Anchor update error:', e);
+            }
+          }
+        }
+      }
 
-    const posBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+      // subtle animation for placed non-anchored models (rotate slowly)
+      const delta = clock.getDelta();
+      for (const p of placed) {
+        if (!p.anchor) {
+          // apply a small spin about Y for visual life (update matrix from position/quaternion)
+          p.object.rotation.y += delta * 0.4;
+          p.object.updateMatrix();
+          p.object.matrixAutoUpdate = false;
+        }
+      }
 
-    const posLoc = gl.getAttribLocation(prog, "aPosition");
-    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(posLoc);
+      // Render scene. three.js will use XR camera automatically.
+      renderer.render(scene, camera);
+    }
 
-    const colBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+    // session end handler
+    function onSessionEnd() {
+      // cleanup
+      hitTestSource = null;
+      lastHitPoseForAnchor = null;
+      lastHitResultForAnchor = null;
+      placed.forEach(p => {
+        try {
+          if (p.anchor && typeof p.anchor.delete === 'function') p.anchor.delete();
+        } catch (e) {}
+        scene.remove(p.object);
+      });
+      placed = [];
+      reticle.visible = false;
+      renderer.setAnimationLoop(null);
+      renderer.xr.setSession(null);
+      xrSession = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      log('AR session ended.');
+    }
 
-    const colLoc = gl.getAttribLocation(prog, "aColor");
-    gl.vertexAttribPointer(colLoc, 4, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(colLoc);
+    // Stop AR manually
+    async function stopXR() {
+      if (!xrSession) return;
+      try {
+        await xrSession.end();
+      } catch (e) {
+        console.warn('Error ending session', e);
+      }
+    }
 
-    const projLoc = gl.getUniformLocation(prog, "uProjection");
-    gl.uniformMatrix4fv(projLoc, false, view.projectionMatrix);
+    // Initialize three and preload model
+    initThree();
+    loadModel();
 
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-}
+    // UI handlers
+    startBtn.addEventListener('click', async () => {
+      await startXR();
+    });
+    stopBtn.addEventListener('click', async () => {
+      await stopXR();
+    });
 
-function createProgram(vs, fs) {
-    const vShader = compile(gl.VERTEX_SHADER, vs);
-    const fShader = compile(gl.FRAGMENT_SHADER, fs);
-    const prog = gl.createProgram();
-    gl.attachShader(prog, vShader);
-    gl.attachShader(prog, fShader);
-    gl.linkProgram(prog);
-    return prog;
-}
+    // initial on-screen hint
+    log('Ready — load a GLB model and press Start AR');
 
-function compile(type, src) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    return s;
-}
-
-</script>
+  </script>
 </body>
 </html>
