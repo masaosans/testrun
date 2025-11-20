@@ -1,641 +1,212 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR AR デモ - レンダリング修正版</title>
+    <title>Simple WebXR AR</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 800px;
-            width: 100%;
-            text-align: center;
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .subtitle {
-            font-size: 1.2rem;
-            margin-bottom: 2rem;
-            opacity: 0.9;
-        }
-
-        .info-panel {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .button-group {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin: 20px 0;
-        }
-
-        button {
-            background: linear-gradient(45deg, #FF6B6B, #EE5A24);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        button:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        button.secondary {
-            background: linear-gradient(45deg, #4ECDC4, #00B894);
-        }
-
-        #arView {
-            width: 100%;
-            height: 400px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 10px;
-            margin: 20px 0;
-            display: none;
-            position: relative;
-            overflow: hidden;
-        }
-
-        #arView.active {
-            display: block;
-        }
-
-        .status {
-            margin: 10px 0;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-
-        .status.success {
-            background: rgba(46, 204, 113, 0.3);
-            border: 1px solid #2ecc71;
-        }
-
-        .status.error {
-            background: rgba(231, 76, 60, 0.3);
-            border: 1px solid #e74c3c;
-        }
-
-        .status.info {
-            background: rgba(52, 152, 219, 0.3);
-            border: 1px solid #3498db;
-        }
-
-        .log {
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 5px;
-            padding: 15px;
-            margin-top: 20px;
-            text-align: left;
-            max-height: 200px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-
-        .feature-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-
-        .feature {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-        }
-
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .button-group {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            button {
-                width: 100%;
-                max-width: 300px;
-            }
-        }
+        body { margin: 0; padding: 20px; font-family: Arial; background: #222; color: white; text-align: center; }
+        button { padding: 15px 30px; margin: 10px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; }
+        #startBtn { background: #4CAF50; color: white; }
+        #stopBtn { background: #f44336; color: white; }
+        #moveBtn { background: #2196F3; color: white; }
+        #arView { width: 100%; height: 400px; background: black; margin: 20px 0; display: none; }
+        #arView.active { display: block; }
+        #info { margin: 10px; padding: 10px; background: #333; border-radius: 5px; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🌐 WebXR AR デモ - 完成版</h1>
-        <p class="subtitle">レンダリングエラーを完全修正</p>
-        
-        <div class="info-panel">
-            <p>✅ 参照空間問題解決 | ✅ WebGL修正 | ✅ レンダリング安定化</p>
-        </div>
-
-        <div class="feature-list">
-            <div class="feature">✅ 安定したレンダリング</div>
-            <div class="feature">✅ カラフルな3Dオブジェクト</div>
-            <div class="feature">✅ 60FPS動作</div>
-            <div class="feature">✅ 自動エラー回復</div>
-        </div>
-
-        <div class="button-group">
-            <button id="checkSupport" class="secondary">サポート確認</button>
-            <button id="startAR">ARを開始</button>
-            <button id="stopAR" disabled>ARを停止</button>
-        </div>
-
-        <div id="status"></div>
-
-        <div id="arView">
-            <canvas id="arCanvas"></canvas>
-        </div>
-
-        <div class="log" id="log">
-            <div>ログ出力:</div>
-        </div>
+    <h1>Simple WebXR AR</h1>
+    <div id="info">ARを開始してください</div>
+    <div>
+        <button id="startBtn" onclick="startAR()">AR開始</button>
+        <button id="stopBtn" onclick="stopAR()" disabled>停止</button>
+        <button id="moveBtn" onclick="moveCube()" disabled>立方体を近づける</button>
+    </div>
+    <div id="arView">
+        <canvas id="arCanvas"></canvas>
     </div>
 
     <script>
-        class WebXRARManager {
-            constructor() {
-                this.session = null;
-                this.canvas = null;
-                this.gl = null;
-                this.supported = false;
-                this.animationFrame = null;
-                this.referenceSpace = null;
-                this.shaderProgram = null;
-                this.cubeRotation = 0;
-                this.initialize();
+        let session = null;
+        let gl = null;
+        let cubeDistance = -2.0;
+
+        async function startAR() {
+            if (!navigator.xr) {
+                showInfo('WebXR非対応');
+                return;
             }
 
-            initialize() {
-                this.canvas = document.getElementById('arCanvas');
-                this.setupEventListeners();
-                this.checkInitialSupport();
-            }
-
-            setupEventListeners() {
-                document.getElementById('checkSupport').addEventListener('click', () => this.checkSupport());
-                document.getElementById('startAR').addEventListener('click', () => this.startAR());
-                document.getElementById('stopAR').addEventListener('click', () => this.stopAR());
-            }
-
-            async checkInitialSupport() {
-                if (!navigator.xr) {
-                    this.log('❌ WebXR APIが利用できません', 'error');
-                    return;
-                }
+            try {
+                session = await navigator.xr.requestSession('immersive-ar');
+                showInfo('AR開始成功');
                 
-                try {
-                    this.supported = await navigator.xr.isSessionSupported('immersive-ar');
-                    this.log(`📱 WebXR AR サポート: ${this.supported ? '✅ あり' : '❌ なし'}`, 'info');
-                    
-                    if (this.supported) {
-                        document.getElementById('startAR').disabled = false;
-                    }
-                } catch (error) {
-                    this.log(`⚠️ サポート確認エラー: ${error.message}`, 'error');
-                }
-            }
-
-            async checkSupport() {
-                this.log('=== 詳細サポート確認開始 ===', 'info');
+                const canvas = document.getElementById('arCanvas');
+                setupWebGL(canvas);
                 
-                if (!navigator.xr) {
-                    this.log('❌ WebXR APIが利用できません', 'error');
-                    return;
-                }
-
-                try {
-                    const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
-                    this.log(`ARセッションサポート: ${arSupported ? '✅' : '❌'}`, 'info');
-
-                    if (arSupported) {
-                        await this.checkReferenceSpaces();
-                    }
-                } catch (error) {
-                    this.log(`⚠️ 詳細確認エラー: ${error.message}`, 'error');
-                }
-            }
-
-            async checkReferenceSpaces() {
-                try {
-                    const session = await navigator.xr.requestSession('immersive-ar');
-                    this.log('✅ テストセッション開始成功', 'success');
-                    
-                    const spaceTypes = ['viewer', 'local', 'local-floor', 'bounded-floor', 'unbounded'];
-                    const availableSpaces = [];
-                    
-                    for (const type of spaceTypes) {
-                        try {
-                            const space = await session.requestReferenceSpace(type);
-                            availableSpaces.push(type);
-                            this.log(`✅ "${type}" 参照空間が利用可能`, 'success');
-                        } catch (e) {
-                            this.log(`❌ "${type}" 参照空間は利用不可`, 'info');
-                        }
-                    }
-                    
-                    await session.end();
-                    this.log(`🎯 利用可能な参照空間: ${availableSpaces.join(', ')}`, 'info');
-                    
-                } catch (error) {
-                    this.log(`⚠️ 参照空間確認エラー: ${error.message}`, 'error');
-                }
-            }
-
-            async getSafeReferenceSpace(session) {
-                const spaceTypes = ['local-floor', 'local', 'viewer'];
+                const glLayer = new XRWebGLLayer(session, gl);
+                await session.updateRenderState({ baseLayer: glLayer });
                 
-                for (const type of spaceTypes) {
-                    try {
-                        const space = await session.requestReferenceSpace(type);
-                        this.log(`✅ 参照空間 "${type}" を使用`, 'success');
-                        return space;
-                    } catch (e) {
-                        this.log(`❌ 参照空間 "${type}" は利用不可: ${e.message}`, 'info');
-                    }
-                }
+                document.getElementById('arView').classList.add('active');
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('moveBtn').disabled = false;
                 
-                throw new Error('利用可能な参照空間がありません');
-            }
-
-            async startAR() {
-                if (!this.supported) {
-                    this.log('❌ WebXR ARはこのデバイスでサポートされていません', 'error');
-                    return;
-                }
-
-                try {
-                    this.log('🚀 ARセッションを開始します...', 'info');
-                    
-                    this.session = await navigator.xr.requestSession('immersive-ar');
-                    this.log('✅ ARセッション開始成功', 'success');
-                    
-                    this.referenceSpace = await this.getSafeReferenceSpace(this.session);
-                    
-                    await this.setupCanvas();
-                    
-                    this.setupWebGL();
-                    
-                    this.initShaderProgram();
-                    
-                    this.startRendering();
-                    
-                    document.getElementById('arView').classList.add('active');
-                    document.getElementById('startAR').disabled = true;
-                    document.getElementById('stopAR').disabled = false;
-                    
-                    this.log('🎉 AR体験が開始されました！カラフルな立方体が表示されます', 'success');
-                    
-                } catch (error) {
-                    this.log(`❌ AR開始エラー: ${error.message}`, 'error');
-                    if (this.session) {
-                        await this.session.end();
-                        this.session = null;
-                    }
-                }
-            }
-
-            async setupCanvas() {
-                if (!this.session) return;
+                startRendering();
                 
-                this.canvas.width = this.canvas.clientWidth * window.devicePixelRatio;
-                this.canvas.height = this.canvas.clientHeight * window.devicePixelRatio;
-                
-                this.setupWebGL();
-                
-                if (!this.gl) {
-                    throw new Error('WebGLコンテキストの作成に失敗しました');
-                }
-                
-                const glLayer = new XRWebGLLayer(this.session, this.gl, {
-                    alpha: true,
-                    depth: true,
-                    stencil: false,
-                    antialias: true,
-                    ignoreDepthValues: false,
-                    framebufferScaleFactor: 1.0
-                });
-                
-                await this.session.updateRenderState({
-                    baseLayer: glLayer
-                });
-                
-                this.log('✅ WebGLレイヤー設定完了', 'success');
-            }
-
-            setupWebGL() {
-                this.gl = this.canvas.getContext('webgl', { 
-                    alpha: true,
-                    depth: true,
-                    stencil: false,
-                    antialias: true,
-                    preserveDrawingBuffer: false,
-                    xrCompatible: true 
-                }) || this.canvas.getContext('experimental-webgl', {
-                    alpha: true,
-                    depth: true,
-                    stencil: false,
-                    antialias: true,
-                    preserveDrawingBuffer: false,
-                    xrCompatible: true
-                });
-                
-                if (!this.gl) {
-                    throw new Error('WebGLをサポートしていません');
-                }
-                
-                this.gl.enable(this.gl.DEPTH_TEST);
-                this.gl.enable(this.gl.CULL_FACE);
-                this.gl.clearColor(0.0, 0.0, 0.0, 0.0);
-                
-                this.log('✅ WebGLコンテキスト初期化完了', 'success');
-            }
-
-            initShaderProgram() {
-                const gl = this.gl;
-                
-                // 頂点シェーダー
-                const vsSource = `
-                    attribute vec4 aVertexPosition;
-                    attribute vec4 aVertexColor;
-                    uniform mat4 uModelViewMatrix;
-                    uniform mat4 uProjectionMatrix;
-                    varying lowp vec4 vColor;
-                    void main(void) {
-                        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-                        vColor = aVertexColor;
-                    }
-                `;
-                
-                // フラグメントシェーダー
-                const fsSource = `
-                    varying lowp vec4 vColor;
-                    void main(void) {
-                        gl_FragColor = vColor;
-                    }
-                `;
-                
-                const vertexShader = this.loadShader(gl, gl.VERTEX_SHADER, vsSource);
-                const fragmentShader = this.loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-                
-                this.shaderProgram = gl.createProgram();
-                gl.attachShader(this.shaderProgram, vertexShader);
-                gl.attachShader(this.shaderProgram, fragmentShader);
-                gl.linkProgram(this.shaderProgram);
-                
-                if (!gl.getProgramParameter(this.shaderProgram, gl.LINK_STATUS)) {
-                    throw new Error('シェーダープログラムの初期化に失敗しました');
-                }
-                
-                this.log('✅ シェーダープログラム初期化完了', 'success');
-            }
-
-            loadShader(gl, type, source) {
-                const shader = gl.createShader(type);
-                gl.shaderSource(shader, source);
-                gl.compileShader(shader);
-                
-                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                    const error = gl.getShaderInfoLog(shader);
-                    gl.deleteShader(shader);
-                    throw new Error(`シェーダーコンパイルエラー: ${error}`);
-                }
-                
-                return shader;
-            }
-
-            startRendering() {
-                if (!this.session || !this.gl) return;
-                
-                const renderLoop = (time, frame) => {
-                    if (!this.session) return;
-                    
-                    try {
-                        const pose = frame.getViewerPose(this.referenceSpace);
-                        const glLayer = this.session.renderState.baseLayer;
-                        
-                        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, glLayer.framebuffer);
-                        this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
-                        
-                        if (pose) {
-                            // 安全にビューポートを処理（修正点）
-                            for (const view of pose.views) {
-                                if (view && view.viewport) {
-                                    const viewport = view.viewport;
-                                    this.gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-                                    this.drawCube(view, time);
-                                }
-                            }
-                        }
-                        
-                        this.animationFrame = this.session.requestAnimationFrame(renderLoop);
-                    } catch (error) {
-                        this.log(`⚠️ レンダリングエラー: ${error.message}`, 'error');
-                        // エラー発生時もセッションは継続
-                        this.animationFrame = this.session.requestAnimationFrame(renderLoop);
-                    }
-                };
-                
-                this.animationFrame = this.session.requestAnimationFrame(renderLoop);
-            }
-
-            drawCube(view, time) {
-                const gl = this.gl;
-                
-                gl.useProgram(this.shaderProgram);
-                
-                // 立方体の頂点データ（位置 + 色）
-                const vertices = new Float32Array([
-                    // 前面 (赤)
-                    -0.5, -0.5,  0.5, 1.0, 0.0, 0.0, 1.0,
-                     0.5, -0.5,  0.5, 1.0, 0.0, 0.0, 1.0,
-                     0.5,  0.5,  0.5, 1.0, 0.0, 0.0, 1.0,
-                    -0.5,  0.5,  0.5, 1.0, 0.0, 0.0, 1.0,
-                    
-                    // 背面 (緑)
-                    -0.5, -0.5, -0.5, 0.0, 1.0, 0.0, 1.0,
-                    -0.5,  0.5, -0.5, 0.0, 1.0, 0.0, 1.0,
-                     0.5,  0.5, -0.5, 0.0, 1.0, 0.0, 1.0,
-                     0.5, -0.5, -0.5, 0.0, 1.0, 0.0, 1.0,
-                    
-                    // 上面 (青)
-                    -0.5,  0.5, -0.5, 0.0, 0.0, 1.0, 1.0,
-                    -0.5,  0.5,  0.5, 0.0, 0.0, 1.0, 1.0,
-                     0.5,  0.5,  0.5, 0.0, 0.0, 1.0, 1.0,
-                     0.5,  0.5, -0.5, 0.0, 0.0, 1.0, 1.0,
-                    
-                    // 下面 (黄)
-                    -0.5, -0.5, -0.5, 1.0, 1.0, 0.0, 1.0,
-                     0.5, -0.5, -0.5, 1.0, 1.0, 0.0, 1.0,
-                     0.5, -0.5,  0.5, 1.0, 1.0, 0.0, 1.0,
-                    -0.5, -0.5,  0.5, 1.0, 1.0, 0.0, 1.0,
-                    
-                    // 右面 (マゼンタ)
-                     0.5, -0.5, -0.5, 1.0, 0.0, 1.0, 1.0,
-                     0.5,  0.5, -0.5, 1.0, 0.0, 1.0, 1.0,
-                     0.5,  0.5,  0.5, 1.0, 0.0, 1.0, 1.0,
-                     0.5, -0.5,  0.5, 1.0, 0.0, 1.0, 1.0,
-                    
-                    // 左面 (シアン)
-                    -0.5, -0.5, -0.5, 0.0, 1.0, 1.0, 1.0,
-                    -0.5, -0.5,  0.5, 0.0, 1.0, 1.0, 1.0,
-                    -0.5,  0.5,  0.5, 0.0, 1.0, 1.0, 1.0,
-                    -0.5,  0.5, -0.5, 0.0, 1.0, 1.0, 1.0
-                ]);
-                
-                const indices = new Uint16Array([
-                    0, 1, 2, 0, 2, 3,       // 前面
-                    4, 5, 6, 4, 6, 7,       // 背面
-                    8, 9, 10, 8, 10, 11,    // 上面
-                    12, 13, 14, 12, 14, 15, // 下面
-                    16, 17, 18, 16, 18, 19, // 右面
-                    20, 21, 22, 20, 22, 23  // 左面
-                ]);
-                
-                // バッファ作成
-                const vertexBuffer = gl.createBuffer();
-                gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-                gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-                
-                const indexBuffer = gl.createBuffer();
-                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-
-                // 属性設定
-                const positionAttribute = gl.getAttribLocation(this.shaderProgram, "aVertexPosition");
-                const colorAttribute = gl.getAttribLocation(this.shaderProgram, "aVertexColor");
-                
-                gl.vertexAttribPointer(positionAttribute, 3, gl.FLOAT, false, 28, 0);
-                gl.vertexAttribPointer(colorAttribute, 4, gl.FLOAT, false, 28, 12);
-                gl.enableVertexAttribArray(positionAttribute);
-                gl.enableVertexAttribArray(colorAttribute);
-                
-                // 行列設定
-                const projectionMatrix = view.projectionMatrix;
-                
-                // モデルビュー行列（回転アニメーション付き）
-                this.cubeRotation = time * 0.001;
-                const modelViewMatrix = new Float32Array([
-                    Math.cos(this.cubeRotation), 0, Math.sin(this.cubeRotation), 0,
-                    0, 1, 0, 0,
-                    -Math.sin(this.cubeRotation), 0, Math.cos(this.cubeRotation), 0,
-                    0, 0, -3, 1
-                ]);
-                
-                // ユニフォーム設定
-                const projectionUniform = gl.getUniformLocation(this.shaderProgram, "uProjectionMatrix");
-                const modelViewUniform = gl.getUniformLocation(this.shaderProgram, "uModelViewMatrix");
-                
-                gl.uniformMatrix4fv(projectionUniform, false, projectionMatrix);
-                gl.uniformMatrix4fv(modelViewUniform, false, modelViewMatrix);
-                
-                // 描画
-                gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-            }
-
-            async stopAR() {
-                if (this.animationFrame) {
-                    this.session.cancelAnimationFrame(this.animationFrame);
-                    this.animationFrame = null;
-                }
-                
-                if (this.session) {
-                    try {
-                        await this.session.end();
-                        this.log('🛑 ARセッションを終了しました', 'info');
-                    } catch (error) {
-                        this.log(`⚠️ セッション終了エラー: ${error.message}`, 'error');
-                    }
-                    this.session = null;
-                }
-                
-                this.referenceSpace = null;
-                document.getElementById('arView').classList.remove('active');
-                document.getElementById('startAR').disabled = false;
-                document.getElementById('stopAR').disabled = true;
-            }
-
-            log(message, type = 'info') {
-                const logElement = document.getElementById('log');
-                const statusElement = document.getElementById('status');
-                
-                const timestamp = new Date().toLocaleTimeString();
-                const logEntry = document.createElement('div');
-                logEntry.textContent = `[${timestamp}] ${message}`;
-                
-                logElement.appendChild(logEntry);
-                logElement.scrollTop = logElement.scrollHeight;
-                
-                if (statusElement) {
-                    statusElement.textContent = message;
-                    statusElement.className = `status ${type}`;
-                }
-                
-                console.log(`[WebXR] ${message}`);
+            } catch (error) {
+                showInfo('エラー: ' + error.message);
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            window.arManager = new WebXRARManager();
-        });
+        function setupWebGL(canvas) {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+            
+            gl = canvas.getContext('webgl', { xrCompatible: true });
+            gl.enable(gl.DEPTH_TEST);
+            gl.clearColor(0, 0, 0, 0);
+        }
 
-        window.addEventListener('resize', () => {
-            if (window.arManager && window.arManager.canvas && window.arManager.session) {
-                window.arManager.canvas.width = window.arManager.canvas.clientWidth * window.devicePixelRatio;
-                window.arManager.canvas.height = window.arManager.canvas.clientHeight * window.devicePixelRatio;
+        function startRendering() {
+            const renderLoop = (time, frame) => {
+                if (!session) return;
+                
+                const pose = frame.getViewerPose(session.renderState.referenceSpace);
+                const glLayer = session.renderState.baseLayer;
+                
+                gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                
+                if (pose) {
+                    pose.views.forEach(view => {
+                        if (view.viewport) {
+                            gl.viewport(view.viewport.x, view.viewport.y, view.viewport.width, view.viewport.height);
+                            drawCube(view, time);
+                        }
+                    });
+                }
+                
+                session.requestAnimationFrame(renderLoop);
+            };
+            
+            session.requestAnimationFrame(renderLoop);
+        }
+
+        function drawCube(view, time) {
+            // シンプルな立方体の描画
+            const vertices = new Float32Array([
+                -0.3, -0.3,  0.3,  0.5, -0.3,  0.3,  0.5,  0.5,  0.3, -0.3,  0.5,  0.3, // 前面
+                -0.3, -0.3, -0.3, -0.3,  0.5, -0.3,  0.5,  0.5, -0.3,  0.5, -0.3, -0.3, // 背面
+            ]);
+            
+            const colors = new Float32Array([
+                1,0,0,1, 1,0,0,1, 1,0,0,1, 1,0,0,1, // 前面(赤)
+                0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1, // 背面(緑)
+            ]);
+            
+            const indices = new Uint16Array([0,1,2,0,2,3,4,5,6,4,6,7]);
+            
+            // バッファ設定
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+            
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+            
+            // シンプルなシェーダー
+            const vs = `attribute vec4 position; attribute vec4 color; uniform mat4 proj; uniform mat4 model; varying vec4 vColor; void main() { gl_Position = proj * model * position; vColor = color; }`;
+            const fs = `varying vec4 vColor; void main() { gl_FragColor = vColor; }`;
+            
+            const program = createProgram(vs, fs);
+            gl.useProgram(program);
+            
+            // 属性設定
+            const positionLoc = gl.getAttribLocation(program, "position");
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(positionLoc);
+            
+            const colorLoc = gl.getAttribLocation(program, "color");
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(colorLoc);
+            
+            // 行列設定
+            const rotation = time * 0.001;
+            const modelMatrix = [
+                Math.cos(rotation), 0, Math.sin(rotation), 0,
+                0, 1, 0, 0,
+                -Math.sin(rotation), 0, Math.cos(rotation), 0,
+                0, 0, cubeDistance, 1
+            ];
+            
+            const projLoc = gl.getUniformLocation(program, "proj");
+            const modelLoc = gl.getUniformLocation(program, "model");
+            
+            gl.uniformMatrix4fv(projLoc, false, view.projectionMatrix);
+            gl.uniformMatrix4fv(modelLoc, false, modelMatrix);
+            
+            // 描画
+            gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+        }
+
+        function createProgram(vsSource, fsSource) {
+            const vertexShader = compileShader(gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fsSource);
+            
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            
+            return program;
+        }
+
+        function compileShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        function moveCube() {
+            cubeDistance += 0.5;
+            if (cubeDistance > -0.5) cubeDistance = -0.5;
+            showInfo('距離: ' + cubeDistance.toFixed(1) + 'm');
+        }
+
+        async function stopAR() {
+            if (session) {
+                await session.end();
+                session = null;
             }
-        });
+            document.getElementById('arView').classList.remove('active');
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('moveBtn').disabled = true;
+            showInfo('AR停止');
+            cubeDistance = -2.0;
+        }
+
+        function showInfo(msg) {
+            document.getElementById('info').textContent = msg;
+            console.log(msg);
+        }
+
+        // 初期チェック
+        if (navigator.xr) {
+            navigator.xr.isSessionSupported('immersive-ar').then(supported => {
+                if (!supported) showInfo('AR非対応デバイス');
+            });
+        }
     </script>
 </body>
 </html>
