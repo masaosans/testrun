@@ -901,39 +901,15 @@ processQueue();
 console.log("Aligned Dynamic OSM viewer started.");
 
 /* ============================================================================
-   ミニマップの描画処理
-   ============================================================================ */
-// ミニマップのキャンバス
-
+// ミニマップ基本設定
+============================================================================ */
 const miniMap = document.getElementById("miniMap");
 const miniCtx = miniMap.getContext("2d");
 
-function resizeCanvas() {
-    miniMap.width = window.innerWidth;
-    miniMap.height = window.innerHeight;
-}
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
-
-// 緯度経度範囲（日本全体）
+let geoData = null;
 const latMax = 45.5, latMin = 24;
 const lonMin = 122, lonMax = 153;
 
-const geoUrl = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
-let geoData = null;
-
-fetch(geoUrl)
-    .then(res => res.json())
-    .then(json => {
-        geoData = json;
-        drawMap();
-    });
-
-
-/* ============================================================================
-   線画での地図描画（初期定義）
-   ============================================================================ */
-// ★ 地図描画用の拡大縮小・オフセット
 let mapScale = 1;
 let mapOffsetX = 0;
 let mapOffsetY = 0;
@@ -943,19 +919,43 @@ let lastDistance = 0;
 let pinchCenterX = 0;
 let pinchCenterY = 0;
 
-//マーカー
+// マーカー
 let markerLon = null;
 let markerLat = null;
 
+// GeoJSON 読み込み
+const geoUrl = "https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson";
+fetch(geoUrl)
+    .then(res => res.json())
+    .then(json => {
+        geoData = json;
+        drawMap();
+    });
+
 /* ============================================================================
-   線画での地図描画（描画処理）
-   ============================================================================ */
+// Canvas サイズ更新（全画面対応）
+============================================================================ */
+function resizeCanvas() {
+    const dpr = window.devicePixelRatio;
+    miniMap.style.width  = window.innerWidth + "px";
+    miniMap.style.height = window.innerHeight + "px";
+    miniMap.width  = window.innerWidth * dpr;
+    miniMap.height = window.innerHeight * dpr;
+    drawMap();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+/* ============================================================================
+// 線画での地図描画
+============================================================================ */
 function drawMap() {
-    if(!geoData) return;
+    if (!geoData) return;
+
     miniCtx.clearRect(0, 0, miniMap.width, miniMap.height);
     miniCtx.save();
-    miniCtx.translate(mapOffsetX, mapOffsetY); // オフセット反映
-    miniCtx.scale(mapScale, mapScale);         // 拡大縮小
+    miniCtx.translate(mapOffsetX, mapOffsetY);
+    miniCtx.scale(mapScale, mapScale);
 
     const cw = miniMap.width;
     const ch = miniMap.height;
@@ -965,43 +965,36 @@ function drawMap() {
     const mapRatio = lonRange / latRange;
     const canvasRatio = cw / ch;
 
-    let scale, xOffset=0, yOffset=0;
-    if(canvasRatio > mapRatio){
-        scale = ch / latRange;
-        xOffset = (cw - scale * lonRange)/2;
+    let baseScale, xOffset = 0, yOffset = 0;
+    if (canvasRatio > mapRatio) {
+        baseScale = ch / latRange;
+        xOffset = (cw - baseScale * lonRange) / 2;
     } else {
-        scale = cw / lonRange;
-        yOffset = (ch - scale * latRange)/2;
+        baseScale = cw / lonRange;
+        yOffset = (ch - baseScale * latRange) / 2;
     }
 
     miniCtx.strokeStyle = "#333";
-    miniCtx.lineWidth = 1 / mapScale; // 線の太さ補正
-    // --- GeoJSON の Polygon / MultiPolygon 両対応の描画 ---
+    miniCtx.lineWidth = 1 / mapScale;
     miniCtx.beginPath();
 
     geoData.features.forEach(feature => {
         const geom = feature.geometry;
-
         if (geom.type === "Polygon") {
-            // Polygon の場合
             geom.coordinates.forEach(ring => {
                 ring.forEach((pt, idx) => {
-                    const x = xOffset + (pt[0] - lonMin) * scale;
-                    const y = yOffset + (latMax - pt[1]) * scale;
-                    if (idx === 0) miniCtx.moveTo(x, y);
-                    else miniCtx.lineTo(x, y);
+                    const x = xOffset + (pt[0] - lonMin) * baseScale;
+                    const y = yOffset + (latMax - pt[1]) * baseScale;
+                    idx === 0 ? miniCtx.moveTo(x, y) : miniCtx.lineTo(x, y);
                 });
             });
-
         } else if (geom.type === "MultiPolygon") {
-            // MultiPolygon の場合
             geom.coordinates.forEach(polygon => {
                 polygon.forEach(ring => {
                     ring.forEach((pt, idx) => {
-                        const x = xOffset + (pt[0] - lonMin) * scale;
-                        const y = yOffset + (latMax - pt[1]) * scale;
-                        if (idx === 0) miniCtx.moveTo(x, y);
-                        else miniCtx.lineTo(x, y);
+                        const x = xOffset + (pt[0] - lonMin) * baseScale;
+                        const y = yOffset + (latMax - pt[1]) * baseScale;
+                        idx === 0 ? miniCtx.moveTo(x, y) : miniCtx.lineTo(x, y);
                     });
                 });
             });
@@ -1009,101 +1002,72 @@ function drawMap() {
     });
 
     miniCtx.stroke();
-    // --- マーカー描画 ---
-    if (markerLon !== null && markerLat !== null) {
-        const sx = xOffset + (markerLon - lonMin) * scale;
-        const sy = yOffset + (latMax - markerLat) * scale;
 
+    // マーカー描画
+    if (markerLon !== null && markerLat !== null) {
+        const sx = xOffset + (markerLon - lonMin) * baseScale;
+        const sy = yOffset + (latMax - markerLat) * baseScale;
         miniCtx.fillStyle = "red";
         miniCtx.beginPath();
-        miniCtx.arc(sx, sy, 6 / mapScale, 0, Math.PI * 2);
+        miniCtx.arc(sx, sy, 6 / mapScale, 0, Math.PI*2);
         miniCtx.fill();
     }
+
     miniCtx.restore();
 }
-/* ============================================================================
-   地図ボタン押下時の処理
-   ============================================================================ */
-const mapButton = document.getElementById("mapButton");
-mapButton.addEventListener("click", () => {
-    miniMap.style.display = miniMap.style.display === "none" ? "block" : "none";
-        // キャンバスの内部解像度も画面いっぱいに合わせる
-    miniMap.width  = window.innerWidth;
-    miniMap.height = window.innerHeight;
-
-    drawMap(); // minimap 描画関数を呼ぶ
-});
-
 
 /* ============================================================================
-   マップクリック時の挙動
-   ============================================================================ */
-
-// ---- miniMap タップで移動＋マーカー設定 ----
+// タップでカメラ移動＋マーカー設定
+============================================================================ */
 miniMap.addEventListener("click", e => {
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
 
-    // CSS → canvas 内部座標
     const tapX = (e.clientX - rect.left) * dpr;
     const tapY = (e.clientY - rect.top) * dpr;
 
-    // 現在の地図範囲
-    const lonRange = (lonMax - lonMin) / mapScale;
-    const latRange = (latMax - latMin) / mapScale;
+    // ドラッグ・ピンチを反映
+    const x = (tapX - mapOffsetX) / mapScale;
+    const y = (tapY - mapOffsetY) / mapScale;
 
-    // canvas 実サイズ
+    // フィットスケール
     const cw = miniMap.width;
     const ch = miniMap.height;
-
-    // 表示比率に応じてフィットスケール決定
+    const lonRange = lonMax - lonMin;
+    const latRange = latMax - latMin;
     const mapRatio = lonRange / latRange;
     const canvasRatio = cw / ch;
 
-    let scale;
-    let xOffset = 0;
-    let yOffset = 0;
-
+    let baseScale, xOffset = 0, yOffset = 0;
     if (canvasRatio > mapRatio) {
-        // canvas が横長 → 上下ぴったり / 左右に余白
-        scale = ch / latRange;
-        xOffset = (cw - lonRange * scale) / 2;
+        baseScale = ch / latRange;
+        xOffset = (cw - baseScale * lonRange) / 2;
     } else {
-        // canvas が縦長 → 左右ぴったり / 上下に余白
-        scale = cw / lonRange;
-        yOffset = (ch - latRange * scale) / 2;
+        baseScale = cw / lonRange;
+        yOffset = (ch - baseScale * latRange) / 2;
     }
 
-    // ---- ★最重要：mapOffsetX/Y を scale に組み込んで逆変換 ----
-    const lon = lonMin + (tapX - xOffset - mapOffsetX) / scale;
-    const lat = latMax - (tapY - yOffset - mapOffsetY) / scale;
+    const lon = lonMin + (x - xOffset) / baseScale;
+    const lat = latMax - (y - yOffset) / baseScale;
 
-    // 移動処理
+    markerLon = lon;
+    markerLat = lat;
+
+    // Three.js カメラ更新
     const m = lonLatToMerc(lon, lat);
     const cameraHeight = camera.position.y;
-
-    camera.position.set(
-        m.x - ORIGIN_M.x,
-        cameraHeight,
-        -(m.y - ORIGIN_M.y)
-    );
-    controls.target.set(
-        m.x - ORIGIN_M.x,
-        0,
-        -(m.y - ORIGIN_M.y)
-    );
-
+    camera.position.set(m.x - ORIGIN_M.x, cameraHeight, -(m.y - ORIGIN_M.y));
+    controls.target.set(m.x - ORIGIN_M.x, 0, -(m.y - ORIGIN_M.y));
     controls.update();
+
     updateTilesAroundCamera();
     drawMap();
-
     miniMap.style.display = "none";
 });
 
 /* ============================================================================
-   マップのオブジェクトのみスワイプ拡大
-   ============================================================================ */
-// スマホのブラウザで画面拡大（スワイプでの拡大）しないように
+// タッチ操作（ドラッグ・ピンチ）
+============================================================================ */
 let isDraggingMap = false;
 let isPinching = false;
 let dragStartX = 0;
@@ -1112,28 +1076,23 @@ let dragStartY = 0;
 miniMap.addEventListener('touchstart', e => {
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
-    const t = e.touches[0];
 
-    if(e.touches.length === 1){
-        // 1本指でドラッグ開始
-       isDraggingMap = true;
+    if (e.touches.length === 1) {
+        isDraggingMap = true;
         const t = e.touches[0];
         dragStartX = (t.clientX - rect.left) * dpr - mapOffsetX;
         dragStartY = (t.clientY - rect.top) * dpr - mapOffsetY;
         isPinching = false;
-
-    } else if(e.touches.length === 2){
-        // 2本指でピンチ開始
+    } else if (e.touches.length === 2) {
         isPinching = true;
         isDraggingMap = false;
 
-        
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         lastDistance = Math.hypot(dx, dy);
 
-        pinchCenterX = ((e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left) * dpr;
-        pinchCenterY = ((e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top) * dpr;
+        pinchCenterX = ((e.touches[0].clientX + e.touches[1].clientX)/2 - rect.left) * dpr;
+        pinchCenterY = ((e.touches[0].clientY + e.touches[1].clientY)/2 - rect.top) * dpr;
     }
 }, { passive: false });
 
@@ -1141,7 +1100,7 @@ miniMap.addEventListener('touchmove', e => {
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
 
-    if(isDraggingMap && e.touches.length === 1){
+    if (isDraggingMap && e.touches.length === 1) {
         e.preventDefault();
         const t = e.touches[0];
         const touchX = (t.clientX - rect.left) * dpr;
@@ -1149,9 +1108,8 @@ miniMap.addEventListener('touchmove', e => {
 
         mapOffsetX = touchX - dragStartX;
         mapOffsetY = touchY - dragStartY;
-
         drawMap();
-    } else if(isPinching && e.touches.length === 2){
+    } else if (isPinching && e.touches.length === 2) {
         e.preventDefault();
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
@@ -1160,12 +1118,9 @@ miniMap.addEventListener('touchmove', e => {
         const scaleChange = distance / lastDistance;
         lastDistance = distance;
 
-        // ピンチ中心に合わせてオフセット補正
-        // mapOffsetX = pinchCenterX - (pinchCenterX - mapOffsetX) * scaleChange;
-        // mapOffsetY = pinchCenterY - (pinchCenterY - mapOffsetY) * scaleChange;
         mapOffsetX = (mapOffsetX - pinchCenterX) * scaleChange + pinchCenterX;
         mapOffsetY = (mapOffsetY - pinchCenterY) * scaleChange + pinchCenterY;
-        
+
         mapScale *= scaleChange;
         mapScale = Math.min(Math.max(mapScale, 0.5), 5);
 
@@ -1177,23 +1132,28 @@ miniMap.addEventListener('touchend', e => {
     const rect = miniMap.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
 
-    if(e.touches.length === 0){
+    if (e.touches.length === 0) {
         isDraggingMap = false;
         isPinching = false;
-
-    } else if(e.touches.length === 1){
-        // 指が 1 本だけ残ったのでドラッグ開始に切り替え
+    } else if (e.touches.length === 1) {
         const t = e.touches[0];
-
         const touchX = (t.clientX - rect.left) * dpr;
         const touchY = (t.clientY - rect.top) * dpr;
 
         dragStartX = touchX - mapOffsetX;
         dragStartY = touchY - mapOffsetY;
-
         isDraggingMap = true;
         isPinching = false;
     }
+});
+
+/* ============================================================================
+// 地図表示ボタン
+============================================================================ */
+const mapButton = document.getElementById("mapButton");
+mapButton.addEventListener("click", () => {
+    miniMap.style.display = miniMap.style.display === "none" ? "block" : "none";
+    drawMap();
 });
 
 /* ===============================
