@@ -1,122 +1,269 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="ja">
 <head>
-  <title>AR モード</title>
-  <meta name="viewport" content="initial-scale=1.0,viewport-fit=cover"> <!-- Android対応 -->
+  <meta charset="utf-8">
+  <title>Simple WebXR AR — Three.js r128</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
   <style>
-    #arButton {
-      position: absolute; /* 画面のどこにでも配置できるように */
-      top: 20px;
-      right: 20px;
-      padding: 10px 20px;
-      background-color: #4CAF50;
+    html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
+    #overlay {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      z-index: 10;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    button {
+      background:#1976d2;color:white;border:none;padding:10px 14px;border-radius:8px;font-size:15px;
+      box-shadow:0 2px 8px rgba(0,0,0,0.2);
+    }
+    #message {
+      background: rgba(0,0,0,0.6);
       color: white;
-      border: none;
-      cursor: pointer;
+      padding:8px 10px;
+      border-radius:8px;
+      font-size:13px;
     }
-
-    #arButton:hover {
-      background-color: #3e8e41;
+    #info {
+      position:absolute;
+      left:12px;
+      bottom:12px;
+      z-index:10;
+      background: rgba(0,0,0,0.6);
+      color:white;padding:10px;border-radius:8px;max-width:320px;font-size:13px;
     }
-
-    #arContainer {
-        width: 100%; /*画面全体を占有 */
-        height: 100vh;  /*画面全体を占有 */
-    }
+    canvas { width:100%; height:100%; display:block; }
+    /* reticle ring style is from three meshes; no CSS needed */
   </style>
 </head>
 <body>
+  <!-- three.js (user requested version) -->
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 
-  <button id="arButton">AR モードを起動</button>
-
-  <div id="arContainer">
-      <!-- ここに Three.js の AR コンテンツをレンダリング -->
+  <div id="overlay">
+    <button id="start-ar">AR を開始</button>
+    <div id="message">対応ブラウザで実行してください</div>
   </div>
 
+  <div id="info">
+    使い方：① 「AR を開始」を押す → ② カメラ位置が決まったら画面をタップ／トリガーでオブジェクトを配置。<br>
+    注：端末とブラウザの WebXR/AR 対応が必要です（Android Chrome 等）。iOS Safari は WebXR 非対応です。
+  </div>
 
   <script>
-    // ARモードの制御
-    let arMode = false;
-    let threejsScene; // Three.js シーンを保持する変数
+  // Basic Three.js scene
+  let scene, camera, renderer;
+  let reticle; // placement preview
+  let hitTestSource = null;
+  let hitTestSourceRequested = false;
+  let xrRefSpace = null;
+  let placedObjects = [];
 
-    const arButton = document.getElementById('arButton');
-    const arContainer = document.getElementById('arContainer');
+  initThree();
+  function initThree(){
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+    renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
 
-    arButton.addEventListener('click', () => {
-      if (!arMode) {
-        startARMode();
-      } else {
-        endARMode();
+    // simple light
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(1, 2, 1);
+    scene.add(light);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 0.3));
+
+    // Reticle (ring)
+    const ringGeom = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
+    const ringMat = new THREE.MeshBasicMaterial({color:0x00ffff, side:THREE.DoubleSide});
+    reticle = new THREE.Mesh(ringGeom, ringMat);
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    window.addEventListener('resize', onWindowResize, false);
+  }
+
+  function onWindowResize(){
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // Create a sample object to place (a colored cube with a marker)
+  function createPlacedObject(){
+    const group = new THREE.Group();
+
+    const geo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+    const mat = new THREE.MeshStandardMaterial({color:0xff6f61, metalness:0.3, roughness:0.6});
+    const box = new THREE.Mesh(geo, mat);
+    box.position.y = 0.06; // lift above the ground so base sits on floor
+    group.add(box);
+
+    // small arrow / marker on top
+    const coneGeo = new THREE.ConeGeometry(0.03, 0.06, 16);
+    const cone = new THREE.Mesh(coneGeo, new THREE.MeshStandardMaterial({color:0xffffff}));
+    cone.position.set(0, 0.18, 0);
+    group.add(cone);
+
+    return group;
+  }
+
+  // Start AR session
+  const startButton = document.getElementById('start-ar');
+  const message = document.getElementById('message');
+  startButton.addEventListener('click', startAR);
+
+  async function startAR(){
+    if (navigator.xr === undefined) {
+      message.textContent = 'このブラウザは WebXR をサポートしていません';
+      return;
+    }
+
+    try {
+      const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+      if (!isSupported) {
+        message.textContent = '端末/ブラウザが AR をサポートしていません';
+        return;
       }
+    } catch(err) {
+      message.textContent = 'isSessionSupported の確認でエラー: ' + err.message;
+      return;
+    }
+
+    const sessionInit = {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'anchors', 'hit-test', 'dom-overlay'],
+      // domOverlay can be helpful to show HTML overlay during AR; requires domOverlay.root set below
+      domOverlay: { root: document.body }
+    };
+
+    try {
+      const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
+      onSessionStarted(session);
+    } catch(err) {
+      message.textContent = 'セッション開始に失敗: ' + err.message;
+    }
+  }
+
+  async function onSessionStarted(session){
+    // Attach renderer to XR session
+    renderer.xr.setSession(session);
+
+    // Reference space for placing objects
+    xrRefSpace = await session.requestReferenceSpace('local-floor').catch(async () => {
+      return session.requestReferenceSpace('local');
     });
 
+    // hit test source setup will be done in render loop when frame is available
+    hitTestSourceRequested = false;
+    placedObjects = [];
 
-    function startARMode() {
-      arMode = true;
-      arButton.textContent = "AR モード終了";
+    // select event for input (tap / controller trigger)
+    session.addEventListener('select', onSelect);
 
-       // Three.js シーンの作成 (Three.jsが読み込まれていることを前提)
-      threejsScene = new THREE.Scene();
-      threejsScene.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100); // カメラを設定
+    renderer.setAnimationLoop(function (timestamp, frame) {
+      if (frame) {
+        const session = frame.session;
 
-      // AR コンテンツのロードと設定 (Three.js でオブジェクトを生成する処理を記述)
-      loadARContent();
+        // Request hit test source once per session
+        if (!hitTestSourceRequested) {
+          const viewerRefSpace = session.requestReferenceSpace('viewer');
+          Promise.resolve(viewerRefSpace).then((vr) => {
+            vr.then?.( ()=>{} ); // no-op; older devices may return directly
+          }).catch(()=>{ /* ignore */ });
 
-      arContainer.appendChild(threejsScene.renderingContext);  // レンダリングコンテキストを追加。これは Three.js がコンテンツを表示するために必要なものです。
+          session.requestReferenceSpace('viewer').then((viewerSpace) => {
+            session.requestHitTestSource({space: viewerSpace}).then((source) => {
+              hitTestSource = source;
+            }).catch((err) => {
+              // some browsers may not support requestHitTestSource; ignore
+              console.warn('requestHitTestSource failed', err);
+            });
+          }).catch((err) => {
+            console.warn('viewer reference space not available: ', err);
+          });
 
+          // If anchors are supported we could create anchors; here we rely on scene objects + hit-test poses
+          hitTestSourceRequested = true;
 
-    }
+          // When session ends, cleanup
+          session.addEventListener('end', () => {
+            hitTestSourceRequested = false;
+            hitTestSource = null;
+            renderer.setAnimationLoop(null);
+            reticle.visible = false;
+            message.textContent = 'セッションが終了しました';
+          });
+        }
 
-
-
-    function endARMode() {
-      arMode = false;
-      arButton.textContent = "AR モードを起動";
-
-       // Three.js シーンの破棄
-      if (threejsScene) {
-        // threejsScene.dispose(); // リソースを解放する処理。必須ではないが推奨
-        arContainer.innerHTML = ''; //コンテナ内をクリア
-        threejsScene = null;
+        // Do hit test each frame to position reticle
+        if (hitTestSource) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(xrRefSpace);
+            if (pose) {
+              // update reticle matrix
+              reticle.visible = true;
+              reticle.matrix.fromArray(pose.transform.matrix);
+            } else {
+              reticle.visible = false;
+            }
+          } else {
+            reticle.visible = false;
+          }
+        }
       }
 
+      renderer.render(scene, camera);
+    });
+
+    message.textContent = 'AR セッション中：画面をタップしてオブジェクトを配置';
+  }
+
+  // When user taps (select), place object at reticle's pose
+  function onSelect(event){
+    if (!reticle.visible) {
+      // no valid placement
+      return;
     }
+    const placed = createPlacedObject();
+    // copy matrix from reticle
+    placed.matrixAutoUpdate = false;
+    placed.matrix.copy(reticle.matrix);
+    scene.add(placed);
+    placedObjects.push(placed);
 
-
-    function loadARContent() {
-      // ここで Three.js で AR コンテンツをロード、設定します。
-      // 例:  オブジェクトの作成と配置
-      const geometry = new THREE.BoxGeometry(1, 1, 1);
-      const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // 緑色
-      const box = new THREE.Mesh(geometry, material);
-
-      threejsScene.add(box);
-
-
-      //画面タップ時のオブジェクト生成処理を実装します。
-       window.addEventListener('click', () => {
-           generateObject(window.mouseX, window.mouseY); //マウスの位置を取得してオブジェクトを生成
-       });
+    // Optionally attempt to create an XRAnchor (if supported). This requires XRFrame.createAnchor in some implementations;
+    // but that API is not available in all browsers. Here we do a best-effort attempt:
+    try {
+      const session = renderer.xr.getSession();
+      // create anchor from hit test result would need frame; since we don't have frame here,
+      // many apps set a flag and create anchor in the next animation frame with the stored pose.
+      // For simplicity, we rely on the placed THREE.Object3D staying in the scene.
+    } catch (e) {
+      // ignore
     }
+  }
 
-
-
-   function generateObject(x, y) {
-        const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-        const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // 赤色
-
-        const obj = new THREE.Mesh(geometry, material);
-        obj.position.set(x, y, 0);  //オブジェクトの位置を設定
-        threejsScene.add(obj);
+  // helper to remove all placed objects (debug)
+  function clearPlacedObjects(){
+    for (const o of placedObjects) {
+      scene.remove(o);
     }
+    placedObjects = [];
+  }
 
-
-
+  // Expose simple debug from console if desired
+  window._ar = {
+    clearPlacedObjects,
+    placedObjects
+  };
 
   </script>
-
-  <!-- Three.js を読み込む (CDN またはローカルファイル) -->
-  <script src="https://threejs.org/build/three.js"></script>
-
 </body>
 </html>
