@@ -518,8 +518,20 @@ function createBoxLODFromWay(el,height){
     const cx = (minX + maxX)/2;
     const cz = (minZ + maxZ)/2;
 
+
+    // ★ 建物名があるか？
+    const tags = el.tags || {};
+    const hasName =
+        tags.name &&
+        tags.name.trim() !== "" &&
+        tags.name !== null &&
+        tags.name !== undefined;
+
+    // ★ 色分け
+    const colorSet = hasName ? 0xdd9999 : 0x999999;
+
     const geo = new THREE.BoxGeometry(sx,height,sz);
-    const mat = new THREE.MeshPhongMaterial({color:0x999999});
+    const mat = new THREE.MeshPhongMaterial({color:colorSet});
     const box = new THREE.Mesh(geo, mat);
 
     // BoxGeometry は中心が 0,0,0 → 建物底面を 0 にするため height/2
