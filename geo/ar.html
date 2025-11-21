@@ -1,420 +1,122 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebXR AR デモ - 修正版</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+  <title>AR モード</title>
+  <meta name="viewport" content="initial-scale=1.0,viewport-fit=cover"> <!-- Android対応 -->
+  <style>
+    #arButton {
+      position: absolute; /* 画面のどこにでも配置できるように */
+      top: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
+    #arButton:hover {
+      background-color: #3e8e41;
+    }
 
-        .container {
-            max-width: 800px;
-            width: 100%;
-            text-align: center;
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .subtitle {
-            font-size: 1.2rem;
-            margin-bottom: 2rem;
-            opacity: 0.9;
-        }
-
-        .info-panel {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 20px;
-            margin: 20px 0;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .button-group {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin: 20px 0;
-        }
-
-        button {
-            background: linear-gradient(45deg, #FF6B6B, #EE5A24);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 50px;
-            font-size: 1.1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        button:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        button.secondary {
-            background: linear-gradient(45deg, #4ECDC4, #00B894);
-        }
-
-        #arView {
-            width: 100%;
-            height: 400px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 10px;
-            margin: 20px 0;
-            display: none;
-            position: relative;
-            overflow: hidden;
-        }
-
-        #arView.active {
-            display: block;
-        }
-
-        .status {
-            margin: 10px 0;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-
-        .status.success {
-            background: rgba(46, 204, 113, 0.3);
-            border: 1px solid #2ecc71;
-        }
-
-        .status.error {
-            background: rgba(231, 76, 60, 0.3);
-            border: 1px solid #e74c3c;
-        }
-
-        .status.info {
-            background: rgba(52, 152, 219, 0.3);
-            border: 1px solid #3498db;
-        }
-
-        .log {
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 5px;
-            padding: 15px;
-            margin-top: 20px;
-            text-align: left;
-            max-height: 200px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
-        }
-
-        .feature-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-
-        .feature {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-        }
-
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .button-group {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            button {
-                width: 100%;
-                max-width: 300px;
-            }
-        }
-    </style>
+    #arContainer {
+        width: 100%; /*画面全体を占有 */
+        height: 100vh;  /*画面全体を占有 */
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🌐 WebXR AR デモ</h1>
-        <p class="subtitle">安全な参照空間処理を実装した修正版</p>
-        
-        <div class="info-panel">
-            <p>このデモは参照空間タイプのエラーを防ぐための安全な実装です</p>
-        </div>
 
-        <div class="feature-list">
-            <div class="feature">✅ 複数参照空間対応</div>
-            <div class="feature">✅ エラーハンドリング</div>
-            <div class="feature">✅ プログレッシブエンハンスメント</div>
-            <div class="feature">✅ レスポンシブデザイン</div>
-        </div>
+  <button id="arButton">AR モードを起動</button>
 
-        <div class="button-group">
-            <button id="checkSupport" class="secondary">サポート確認</button>
-            <button id="startAR">ARを開始</button>
-            <button id="stopAR" disabled>ARを停止</button>
-        </div>
+  <div id="arContainer">
+      <!-- ここに Three.js の AR コンテンツをレンダリング -->
+  </div>
 
-        <div id="status"></div>
 
-        <div id="arView">
-            <canvas id="arCanvas"></canvas>
-        </div>
+  <script>
+    // ARモードの制御
+    let arMode = false;
+    let threejsScene; // Three.js シーンを保持する変数
 
-        <div class="log" id="log">
-            <div>ログ出力:</div>
-        </div>
-    </div>
+    const arButton = document.getElementById('arButton');
+    const arContainer = document.getElementById('arContainer');
 
-    <script>
-        class WebXRARManager {
-            constructor() {
-                this.session = null;
-                this.canvas = null;
-                this.gl = null;
-                this.supported = false;
-                this.initialize();
-            }
+    arButton.addEventListener('click', () => {
+      if (!arMode) {
+        startARMode();
+      } else {
+        endARMode();
+      }
+    });
 
-            initialize() {
-                this.canvas = document.getElementById('arCanvas');
-                this.setupEventListeners();
-                this.checkInitialSupport();
-            }
 
-            setupEventListeners() {
-                document.getElementById('checkSupport').addEventListener('click', () => this.checkSupport());
-                document.getElementById('startAR').addEventListener('click', () => this.startAR());
-                document.getElementById('stopAR').addEventListener('click', () => this.stopAR());
-            }
+    function startARMode() {
+      arMode = true;
+      arButton.textContent = "AR モード終了";
 
-            async checkInitialSupport() {
-                if (!navigator.xr) {
-                    this.log('❌ WebXR APIが利用できません', 'error');
-                    return;
-                }
-                
-                try {
-                    this.supported = await navigator.xr.isSessionSupported('immersive-ar');
-                    this.log(`📱 WebXR AR サポート: ${this.supported ? '✅ あり' : '❌ なし'}`, 'info');
-                    
-                    if (this.supported) {
-                        document.getElementById('startAR').disabled = false;
-                    }
-                } catch (error) {
-                    this.log(`⚠️ サポート確認エラー: ${error.message}`, 'error');
-                }
-            }
+       // Three.js シーンの作成 (Three.jsが読み込まれていることを前提)
+      threejsScene = new THREE.Scene();
+      threejsScene.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100); // カメラを設定
 
-            async checkSupport() {
-                this.log('=== 詳細サポート確認開始 ===', 'info');
-                
-                if (!navigator.xr) {
-                    this.log('❌ WebXR APIが利用できません', 'error');
-                    return;
-                }
+      // AR コンテンツのロードと設定 (Three.js でオブジェクトを生成する処理を記述)
+      loadARContent();
 
-                try {
-                    // 基本的なサポート確認
-                    const arSupported = await navigator.xr.isSessionSupported('immersive-ar');
-                    this.log(`ARセッションサポート: ${arSupported ? '✅' : '❌'}`, 'info');
+      arContainer.appendChild(threejsScene.renderingContext);  // レンダリングコンテキストを追加。これは Three.js がコンテンツを表示するために必要なものです。
 
-                    if (arSupported) {
-                        // 参照空間タイプの確認
-                        await this.checkReferenceSpaces();
-                    }
-                } catch (error) {
-                    this.log(`⚠️ 詳細確認エラー: ${error.message}`, 'error');
-                }
-            }
 
-            async checkReferenceSpaces() {
-                try {
-                    const session = await navigator.xr.requestSession('immersive-ar');
-                    this.log('✅ テストセッション開始成功', 'success');
-                    
-                    const spaceTypes = ['viewer', 'local', 'local-floor', 'bounded-floor', 'unbounded'];
-                    const availableSpaces = [];
-                    
-                    for (const type of spaceTypes) {
-                        try {
-                            const space = await session.requestReferenceSpace(type);
-                            availableSpaces.push(type);
-                            this.log(`✅ "${type}" 参照空間が利用可能`, 'success');
-                        } catch (e) {
-                            this.log(`❌ "${type}" 参照空間は利用不可`, 'info');
-                        }
-                    }
-                    
-                    await session.end();
-                    this.log(`🎯 利用可能な参照空間: ${availableSpaces.join(', ')}`, 'info');
-                    
-                } catch (error) {
-                    this.log(`⚠️ 参照空間確認エラー: ${error.message}`, 'error');
-                }
-            }
+    }
 
-            async getSafeReferenceSpace(session) {
-                const spaceTypes = ['local-floor', 'local', 'viewer'];
-                
-                for (const type of spaceTypes) {
-                    try {
-                        const space = await session.requestReferenceSpace(type);
-                        this.log(`✅ 参照空間 "${type}" を使用`, 'success');
-                        return space;
-                    } catch (e) {
-                        this.log(`❌ 参照空間 "${type}" は利用不可: ${e.message}`, 'info');
-                    }
-                }
-                
-                throw new Error('利用可能な参照空間がありません');
-            }
 
-            async startAR() {
-                if (!this.supported) {
-                    this.log('❌ WebXR ARはこのデバイスでサポートされていません', 'error');
-                    return;
-                }
 
-                try {
-                    this.log('🚀 ARセッションを開始します...', 'info');
-                    
-                    // ARセッションを開始
-                    this.session = await navigator.xr.requestSession('immersive-ar');
-                    this.log('✅ ARセッション開始成功', 'success');
-                    
-                    // 安全な参照空間を取得
-                    const referenceSpace = await this.getSafeReferenceSpace(this.session);
-                    
-                    // Canvasをセットアップ
-                    await this.setupCanvas();
-                    
-                    // WebGLコンテキストをセットアップ
-                    this.setupWebGL();
-                    
-                    // ARビューを表示
-                    document.getElementById('arView').classList.add('active');
-                    document.getElementById('startAR').disabled = true;
-                    document.getElementById('stopAR').disabled = false;
-                    
-                    this.log('🎉 AR体験が開始されました！デバイスを動かして周囲を見回してください', 'success');
-                    
-                } catch (error) {
-                    this.log(`❌ AR開始エラー: ${error.message}`, 'error');
-                }
-            }
+    function endARMode() {
+      arMode = false;
+      arButton.textContent = "AR モードを起動";
 
-            async setupCanvas() {
-                if (!this.session) return;
-                
-                this.canvas.width = window.innerWidth * 0.8;
-                this.canvas.height = 400;
-                
-                await this.session.updateRenderState({
-                    baseLayer: new XRWebGLLayer(this.session, this.gl)
-                });
-            }
+       // Three.js シーンの破棄
+      if (threejsScene) {
+        // threejsScene.dispose(); // リソースを解放する処理。必須ではないが推奨
+        arContainer.innerHTML = ''; //コンテナ内をクリア
+        threejsScene = null;
+      }
 
-            setupWebGL() {
-                this.gl = this.canvas.getContext('webgl', { 
-                    xrCompatible: true 
-                });
-                
-                if (!this.gl) {
-                    throw new Error('WebGLコンテキストの作成に失敗しました');
-                }
-                
-                // 基本的なWebGL設定
-                this.gl.clearColor(0, 0, 0, 0);
-                this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-            }
+    }
 
-            async stopAR() {
-                if (this.session) {
-                    try {
-                        await this.session.end();
-                        this.log('🛑 ARセッションを終了しました', 'info');
-                    } catch (error) {
-                        this.log(`⚠️ セッション終了エラー: ${error.message}`, 'error');
-                    }
-                    this.session = null;
-                }
-                
-                document.getElementById('arView').classList.remove('active');
-                document.getElementById('startAR').disabled = false;
-                document.getElementById('stopAR').disabled = true;
-            }
 
-            log(message, type = 'info') {
-                const logElement = document.getElementById('log');
-                const statusElement = document.getElementById('status');
-                
-                const timestamp = new Date().toLocaleTimeString();
-                const logEntry = document.createElement('div');
-                logEntry.textContent = `[${timestamp}] ${message}`;
-                
-                logElement.appendChild(logEntry);
-                logElement.scrollTop = logElement.scrollHeight;
-                
-                // ステータス表示を更新
-                if (statusElement) {
-                    statusElement.textContent = message;
-                    statusElement.className = `status ${type}`;
-                }
-                
-                console.log(`[WebXR] ${message}`);
-            }
-        }
+    function loadARContent() {
+      // ここで Three.js で AR コンテンツをロード、設定します。
+      // 例:  オブジェクトの作成と配置
+      const geometry = new THREE.BoxGeometry(1, 1, 1);
+      const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // 緑色
+      const box = new THREE.Mesh(geometry, material);
 
-        // アプリケーションの初期化
-        document.addEventListener('DOMContentLoaded', () => {
-            window.arManager = new WebXRARManager();
-        });
+      threejsScene.add(box);
 
-        // リサイズ処理
-        window.addEventListener('resize', () => {
-            if (window.arManager && window.arManager.canvas) {
-                window.arManager.canvas.width = window.innerWidth * 0.8;
-                window.arManager.canvas.height = 400;
-            }
-        });
-    </script>
+
+      //画面タップ時のオブジェクト生成処理を実装します。
+       window.addEventListener('click', () => {
+           generateObject(window.mouseX, window.mouseY); //マウスの位置を取得してオブジェクトを生成
+       });
+    }
+
+
+
+   function generateObject(x, y) {
+        const geometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // 赤色
+
+        const obj = new THREE.Mesh(geometry, material);
+        obj.position.set(x, y, 0);  //オブジェクトの位置を設定
+        threejsScene.add(obj);
+    }
+
+
+
+
+  </script>
+
+  <!-- Three.js を読み込む (CDN またはローカルファイル) -->
+  <script src="https://threejs.org/build/three.js"></script>
+
 </body>
 </html>
