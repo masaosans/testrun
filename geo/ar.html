@@ -2,202 +2,209 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>AR 古地図 + 行政界 — 完成版 (Three.js r128)</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<title>AR 古地図 + 行政界 — 完全版</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+
+<!-- Three.js r128 -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+
+<!-- Debug console -->
 <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
 <script>eruda.init();</script>
-  <style>
-  html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
-  canvas{display:block;width:100%;height:100%}
-  /* DOM overlay UI (visible & clickable inside AR) */
-  #ui {
-    position:fixed;
-    left:10px;
-    top:10px;
-    z-index:10000;
-    background:rgba(0,0,0,0.55);
-    color:#fff;
-    padding:10px;
-    border-radius:10px;
-    width:320px;
-    box-shadow:0 6px 18px rgba(0,0,0,0.4);
-  }
-  #ui input,#ui select{width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid #333;background:rgba(255,255,255,0.06);color:#fff}
-  #ui button{width:100%;margin-top:8px;padding:8px;border-radius:8px;border:none;background:#1976d2;color:#fff;cursor:pointer;font-weight:600}
-  #status {
-    position:fixed; left:10px; bottom:10px; z-index:10000;
-    background:rgba(0,0,0,0.55); color:#fff; padding:8px; border-radius:8px; font-size:13px;
-  }
-  small.note{display:block;color:#ddd;margin-top:6px;font-size:12px}
+
+<style>
+html,body {
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  height:100%;
+  background: transparent;
+  font-family: system-ui, "Noto Sans JP", sans-serif;
+}
+
+#ui {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 10001;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  padding: 12px;
+  border-radius: 12px;
+  width: 300px;
+}
+
+#ui button, #ui input, #ui select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+}
+
+#status {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  z-index: 10001;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
 </style>
 </head>
+
 <body>
-  <div id="ui">
-    <div style="font-weight:700">AR 古地図＋行政界（完成版）</div>
-    <button id="start-ar">AR を開始</button>
 
-    <label>
-      古地図タイルテンプレート（全国対応例：農研）：
-      <input id="tile-template" value="https://aginfo.cgk.affrc.go.jp/ws/tmc/1.0.0/200k/map/{z}/{x}/{y}.png">
-    </label>
+<!-- UI / DOM Overlay -->
+<div id="ui">
+  <div style="font-weight:700;">AR 古地図 + 行政界</div>
 
-    <label>
-      タイルズーム (14-16 推奨)
-      <input id="tile-zoom" value="14">
-    </label>
+  <button id="start-ar">AR開始</button>
 
-    <label>
-      ステッチ (奇数: 1 / 3 / 5)
-      <select id="tile-grid"><option>1</option><option selected>3</option><option>5</option></select>
-    </label>
+  <label>古地図タイルテンプレ
+    <input id="tile-template"
+      value="https://aginfo.cgk.affrc.go.jp/ws/tmc/1.0.0/200k/map/{z}/{x}/{y}.png">
+  </label>
 
-    <label>
-      行政界 GeoJSON URL（CORS に引っかかる場合は同一サーバに保存してください）
-      <input id="geojson-url" value="https://raw.githubusercontent.com/geolonia/japanese-admin-boundaries/master/dist/japan.geojson">
-    </label>
+  <label>タイルズーム
+    <input id="tile-zoom" value="14">
+  </label>
 
-    <button id="load-geo">行政界を取得</button>
-    <button id="clear-all">配置クリア</button>
+  <label>ステッチ
+    <select id="tile-grid">
+      <option>1</option>
+      <option selected>3</option>
+      <option>5</option>
+    </select>
+  </label>
 
-    <small class="note">注意：動作は WebXR 対応ブラウザ（HTTPS）で実機テストしてください。</small>
-  </div>
+  <label>行政界 GeoJSON URL
+    <input id="geojson-url"
+      value="https://raw.githubusercontent.com/geolonia/japanese-admin-boundaries/master/dist/japan.geojson">
+  </label>
 
-  <div id="status">状態: 待機</div>
+  <button id="load-geo">行政界ロード</button>
+  <button id="clear-all">配置クリア</button>
+</div>
+
+<div id="status">状態: 待機</div>
 
 <script>
-
-/* 完成版：ARで古地図(全国)をジオ参照配置 + 行政界を重ねる
-   - three.js r0.128 を使用
-   - dom-overlay を有効にして AR 中も UI を操作可能
-   - reticle + hit-test を用いてタップ時に配置
-   - geolocation を利用して「現在地」を中心にタイルを取得
-   - GeoJSON をフェッチして緯度経度→メートル換算で描画
-*/
-
-/* -------------------- グローバル -------------------- */
+// =========================================
+// Three.js + AR 初期化
+// =========================================
 let scene, camera, renderer;
-let reticle, lastReticleMatrix = null;
+let reticle;
 let xrRefSpace = null;
 let hitTestSource = null;
 let hitTestSourceRequested = false;
+let lastReticleMatrix = null;
+
 let placedObjects = [];
 let adminGeoJSON = null;
-const statusEl = document.getElementById('status');
 
-/* -------------------- 初期化 -------------------- */
-function initThree(){
+const statusEl = document.getElementById("status");
+
+// -----------------------------------------
+function initThree() {
   scene = new THREE.Scene();
 
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
-  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  camera = new THREE.PerspectiveCamera(70,
+    window.innerWidth / window.innerHeight,
+    0.01, 100);
+
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true
+  });
+
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
   renderer.xr.enabled = true;
+
   document.body.appendChild(renderer.domElement);
 
-  // 基本ライト（これが無いとオブジェクトが暗い）
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-  scene.add(hemi);
+  // Light
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
   const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-  dir.position.set(1,2,1);
+  dir.position.set(1, 2, 1);
   scene.add(dir);
 
   // Reticle
-  const ring = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
-  const ringMat = new THREE.MeshBasicMaterial({ color:0x00ffff, side:THREE.DoubleSide });
-  reticle = new THREE.Mesh(ring, ringMat);
-  reticle.matrixAutoUpdate = false;
+  const geo = new THREE.RingGeometry(0.05, 0.07, 32).rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+  reticle = new THREE.Mesh(geo, mat);
   reticle.visible = false;
+  reticle.matrixAutoUpdate = false;
   scene.add(reticle);
-
-  window.addEventListener('resize', onWindowResize);
-}
-function onWindowResize(){
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
 }
 initThree();
 
-/* -------------------- UI イベント -------------------- */
-document.getElementById('start-ar').addEventListener('click', startAR);
-document.getElementById('load-geo').addEventListener('click', loadAdminGeoJSON);
-document.getElementById('clear-all').addEventListener('click', clearPlacedObjects);
+// =========================================
+// AR開始
+// =========================================
+document.getElementById("start-ar").onclick = startAR;
 
-/* -------------------- 起動 / セッション -------------------- */
-async function startAR(){
+async function startAR() {
   if (!navigator.xr) {
-    alert('このブラウザは WebXR をサポートしていません');
+    alert("WebXR未対応です");
     return;
   }
-  try {
-    const supported = await navigator.xr.isSessionSupported('immersive-ar');
-    if (!supported) { alert('端末/ブラウザがARをサポートしていません'); return; }
-  } catch(e){
-    console.warn('isSessionSupported error', e);
+
+  const supported = await navigator.xr.isSessionSupported("immersive-ar");
+  if (!supported) {
+    alert("このデバイスはARをサポートしていません");
+    return;
   }
 
-  try {
-    // dom-overlay を requiredFeatures にして root に DOM を渡す（必須）
-    const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test', 'dom-overlay'],
-      domOverlay: { root: document.body }
-    });
+  const session = await navigator.xr.requestSession("immersive-ar", {
+    requiredFeatures: ["hit-test", "dom-overlay"],
+    domOverlay: { root: document.body }
+  });
 
-    // **ここが重要**: renderer にセッションをセットすることでカメラ映像が描画される
-    renderer.xr.setSession(session);
+  renderer.xr.setSession(session);
 
-    xrRefSpace = await session.requestReferenceSpace('local-floor').catch(()=> session.requestReferenceSpace('local'));
+  xrRefSpace = await session.requestReferenceSpace("local")
+    .catch(_ => session.requestReferenceSpace("viewer"));
+
+  session.addEventListener("select", onSelect);
+  session.addEventListener("end", () => {
     hitTestSourceRequested = false;
+    hitTestSource = null;
+    renderer.setAnimationLoop(null);
+  });
 
-    session.addEventListener('select', (ev) => { onSelect(); });
-    session.addEventListener('end', () => {
-      hitTestSourceRequested = false;
-      hitTestSource = null;
-      renderer.setAnimationLoop(null);
-      reticle.visible = false;
-      statusEl.textContent = '状態: セッション終了';
-    });
-
-    renderer.setAnimationLoop(render);
-    statusEl.textContent = '状態: AR セッション中 — 床を検出してからタップ';
-  } catch(err){
-    console.error(err);
-    alert('AR セッション開始でエラー: ' + err.message);
-  }
+  renderer.setAnimationLoop(renderAR);
+  statusEl.textContent = "状態: ARセッション開始";
 }
 
-/* -------------------- レンダーループ（hit-test 実行） -------------------- */
-function render(timestamp, frame){
+// =========================================
+// ARフレーム
+// =========================================
+function renderAR(timestamp, frame) {
   if (frame) {
     const session = frame.session;
 
-    // hit test source を一度だけリクエスト
     if (!hitTestSourceRequested) {
-      session.requestReferenceSpace('viewer').then(viewerSpace => {
-        session.requestHitTestSource({ space: viewerSpace }).then(source => {
-          hitTestSource = source;
-        }).catch(e => console.warn('requestHitTestSource failed', e));
-      }).catch(e => console.warn('requestReferenceSpace viewer failed', e));
+      session.requestReferenceSpace("viewer").then(viewerSpace => {
+        session.requestHitTestSource({ space: viewerSpace })
+          .then(src => hitTestSource = src);
+      });
       hitTestSourceRequested = true;
     }
 
-    // hit test 結果で reticle を更新
     if (hitTestSource) {
-      const hitResults = frame.getHitTestResults(hitTestSource);
-      if (hitResults.length > 0) {
-        const hit = hitResults[0];
-        const pose = hit.getPose(xrRefSpace);
+      const hits = frame.getHitTestResults(hitTestSource);
+      if (hits.length > 0) {
+        const pose = hits[0].getPose(xrRefSpace);
         if (pose) {
           reticle.visible = true;
-          const mat = new THREE.Matrix4().fromArray(pose.transform.matrix);
-          reticle.matrix.copy(mat);
-          // save last pose matrix for onSelect use
-          lastReticleMatrix = mat.clone();
-        } else {
-          reticle.visible = false;
-          lastReticleMatrix = null;
+          const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+          reticle.matrix.copy(m);
+          lastReticleMatrix = m.clone();
         }
       } else {
         reticle.visible = false;
@@ -205,237 +212,215 @@ function render(timestamp, frame){
       }
     }
   }
-
   renderer.render(scene, camera);
 }
 
-/* -------------------- select（タップ）: 古地図 + 行政界 を配置 -------------------- */
-async function onSelect(){
-  if (!reticle.visible || !lastReticleMatrix) {
-    statusEl.textContent = '状態: 配置できる平面が見つかりません';
+// =========================================
+// タップで古地図＋行政界を配置
+// =========================================
+async function onSelect() {
+  if (!lastReticleMatrix || !reticle.visible) {
+    statusEl.textContent = "状態: 配置できません";
     return;
   }
 
-  // 1) 現在位置（中心）を取得（失敗時は東京 fallback）
-  let centerLat, centerLon;
+  // 1. 現在地取得
+  let centerLat = 35.681236, centerLon = 139.767125;
+
   try {
-    const pos = await getCurrentPosition({ enableHighAccuracy: true, timeout:7000 });
+    const pos = await new Promise((res, rej) =>
+      navigator.geolocation.getCurrentPosition(res, rej, {
+        enableHighAccuracy: true, timeout: 6000
+      })
+    );
     centerLat = pos.coords.latitude;
     centerLon = pos.coords.longitude;
-  } catch(e){
-    console.warn('geolocation failed', e);
-    centerLat = 35.681236; centerLon = 139.767125; // 東京駅 fallback
-    statusEl.textContent = '状態: 位置情報取得失敗。東京駅を中心に表示します';
-  }
+  } catch (e) {}
 
-  // 2) タイル設定を UI から取得
-  const template = document.getElementById('tile-template').value.trim();
-  const zoom = parseInt(document.getElementById('tile-zoom').value) || 14;
-  const grid = parseInt(document.getElementById('tile-grid').value) || 3;
+  const zoom = parseInt(document.getElementById("tile-zoom").value);
+  const grid = parseInt(document.getElementById("tile-grid").value);
+  const tmpl = document.getElementById("tile-template").value;
 
-  statusEl.textContent = '状態: 古地図タイル取得中… (CORS により失敗する場合があります)';
+  statusEl.textContent = "状態: タイル取得中…";
 
-  // 3) タイル座標を算出してステッチ
+  // タイル座標へ
   const tile = lonLatToTile(centerLon, centerLat, zoom);
   let tex;
+
   try {
-    tex = await createStitchedTileTexture(template, zoom, tile.x, tile.y, grid);
-  } catch(e){
-    console.error('tile stitch error', e);
-    alert('古地図タイルの取得に失敗しました。\nCORS の可能性が高いです。外部タイルを同一ホストに置くか、別テンプレートを試してください。\n' + e.message);
-    statusEl.textContent = '状態: タイル取得失敗';
+    tex = await createStitchedTileTexture(tmpl, zoom, tile.x, tile.y, grid);
+  } catch (e) {
+    alert("タイル取得失敗\n" + e.message);
     return;
   }
 
-  // 4) メートル単位で地図平面を作成して reticle に配置
-  const metersPerTile = tileSizeMeters(centerLat, zoom);
-  const mapSizeMeters = metersPerTile * grid;
-  const geom = new THREE.PlaneGeometry(mapSizeMeters, mapSizeMeters);
-  const mat = new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness:0.8, metalness:0.0 });
-  const plane = new THREE.Mesh(geom, mat);
-  plane.rotation.x = -Math.PI/2;
-  plane.matrixAutoUpdate = false;
-  plane.matrix.copy(lastReticleMatrix); // anchor at reticle (center)
-  scene.add(plane);
-  placedObjects.push(plane);
+  const size = tileSizeMeters(centerLat, zoom) * grid;
+  const geo = new THREE.PlaneGeometry(size, size);
+  const mat = new THREE.MeshStandardMaterial({
+    map: tex,
+    side: THREE.DoubleSide
+  });
 
-  statusEl.textContent = '状態: 古地図を配置しました（中心: ' + centerLat.toFixed(6) + ', ' + centerLon.toFixed(6) + '）';
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix.copy(lastReticleMatrix);
 
-  // 5) 行政界を adminGeoJSON があれば同心に描画（lon/lat -> メートル）
+  scene.add(mesh);
+  placedObjects.push(mesh);
+
+  // 行政界
   if (adminGeoJSON) {
-    statusEl.textContent = '状態: 行政界を描画中…';
-    const group = new THREE.Group();
-    group.matrixAutoUpdate = false;
-    group.matrix.copy(lastReticleMatrix);
-
-    const features = adminGeoJSON.features || [];
-    for (const f of features) {
-      if (!f.geometry) continue;
-      const geomType = f.geometry.type;
-      try {
-        if (geomType === 'Polygon') {
-          const m = geoPolygonToMesh(f.geometry.coordinates, centerLon, centerLat);
-          if (m) group.add(m);
-        } else if (geomType === 'MultiPolygon') {
-          for (const poly of f.geometry.coordinates) {
-            const m = geoPolygonToMesh(poly, centerLon, centerLat);
-            if (m) group.add(m);
-          }
-        } else if (geomType === 'LineString') {
-          const l = geoLineToMesh(f.geometry.coordinates, centerLon, centerLat);
-          if (l) group.add(l);
-        } else if (geomType === 'MultiLineString') {
-          for (const ln of f.geometry.coordinates) {
-            const l = geoLineToMesh(ln, centerLon, centerLat);
-            if (l) group.add(l);
-          }
-        }
-      } catch(e){
-        console.warn('feature draw failed', e);
-        continue;
-      }
-    }
-
-    scene.add(group);
-    placedObjects.push(group);
-    statusEl.textContent = '状態: 配置完了（古地図＋行政界）';
-  } else {
-    statusEl.textContent = '状態: 古地図配置完了（行政界未ロード）';
+    drawGeoJSON(centerLon, centerLat, lastReticleMatrix);
   }
+
+  statusEl.textContent = "状態: 配置完了";
 }
 
-/* -------------------- GeoJSON をロード -------------------- */
-async function loadAdminGeoJSON(){
-  const url = document.getElementById('geojson-url').value.trim();
-  statusEl.textContent = '状態: GeoJSON を取得中…';
+// =========================================
+// GeoJSON ロード
+// =========================================
+document.getElementById("load-geo").onclick = async () => {
+  const url = document.getElementById("geojson-url").value;
+  statusEl.textContent = "状態: GeoJSON取得中";
+
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
     adminGeoJSON = await res.json();
-    statusEl.textContent = '状態: GeoJSON 読込完了（features:' + (adminGeoJSON.features ? adminGeoJSON.features.length : 'unknown') + '）';
-  } catch(e){
-    console.error(e);
-    adminGeoJSON = null;
-    statusEl.textContent = '状態: GeoJSON 取得失敗。CORS の可能性があります。';
-    alert('GeoJSON の取得に失敗しました。ファイルを同一ホストに置くか URL を確認してください。\n' + e.message);
+    statusEl.textContent = "状態: GeoJSON読込完了";
+  } catch (e) {
+    alert("GeoJSON取得失敗\n" + e.message);
   }
+};
+
+// =========================================
+// 緯度経度 <-> XYZ
+// =========================================
+function metersPerDegLat() { return 111320; }
+function metersPerDegLon(lat) { return Math.cos(lat * Math.PI/180) * 111320; }
+
+function lonLatToPosition(lon, lat, cx, cy) {
+  return new THREE.Vector3(
+    (lon - cx) * metersPerDegLon(cy),
+    0,
+    -(lat - cy) * metersPerDegLat()
+  );
 }
 
-/* -------------------- 描画ヘルパ（Geo -> three.js） -------------------- */
-function metersPerDegLat(){ return 111320.0; }
-function metersPerDegLon(lat){ return Math.cos(lat * Math.PI / 180.0) * 111320.0; }
-function lonLatToPosition(lon, lat, centerLon, centerLat){
-  const dx = (lon - centerLon) * metersPerDegLon(centerLat);
-  const dz = (lat - centerLat) * metersPerDegLat();
-  return new THREE.Vector3(dx, 0, -dz);
-}
+// ------------------------------------------
+function drawGeoJSON(cx, cy, baseMatrix) {
+  const group = new THREE.Group();
+  group.matrixAutoUpdate = false;
+  group.matrix.copy(baseMatrix);
 
-function geoLineToMesh(coords, centerLon, centerLat){
-  const pts = coords.map(c => {
-    const v = lonLatToPosition(c[0], c[1], centerLon, centerLat);
-    return new THREE.Vector3(v.x, 0.02, v.z);
-  });
-  if (pts.length < 2) return null;
-  const geom = new THREE.BufferGeometry().setFromPoints(pts);
-  const mat = new THREE.LineBasicMaterial({ color:0xff4444, linewidth:2 });
-  return new THREE.Line(geom, mat);
-}
+  for (const f of adminGeoJSON.features) {
+    const g = f.geometry;
+    if (!g) continue;
 
-function geoPolygonToMesh(polygonCoords, centerLon, centerLat){
-  // polygonCoords: [ring0, ring1...] ; use ring0 for fill & outline
-  const ring = polygonCoords[0];
-  if (!ring || ring.length < 3) return null;
-  const pts3 = ring.map(c => {
-    const v = lonLatToPosition(c[0], c[1], centerLon, centerLat);
-    return new THREE.Vector3(v.x, 0.015, v.z);
-  });
-  const outlineGeom = new THREE.BufferGeometry().setFromPoints(pts3);
-  const outline = new THREE.LineLoop(outlineGeom, new THREE.LineBasicMaterial({ color:0x00ff00 }));
+    if (g.type === "Polygon") {
+      const obj = geoPolygon(g.coordinates, cx, cy);
+      if (obj) group.add(obj);
 
-  // fill: triangulate using Shape
-  const pts2 = ring.map(c => {
-    const v = lonLatToPosition(c[0], c[1], centerLon, centerLat);
-    return new THREE.Vector2(v.x, v.z);
-  });
-  const shape = new THREE.Shape(pts2);
-  const shapeGeom = new THREE.ShapeBufferGeometry(shape);
-  const fill = new THREE.Mesh(shapeGeom, new THREE.MeshStandardMaterial({ color:0x00ff00, opacity:0.18, transparent:true, side:THREE.DoubleSide }));
-  fill.rotation.x = -Math.PI/2;
-  fill.position.y = 0.01;
-
-  const g = new THREE.Group();
-  g.add(outline);
-  g.add(fill);
-  return g;
-}
-
-/* -------------------- タイル関係 -------------------- */
-function lonLatToTile(lon, lat, zoom){
-  const latRad = lat * Math.PI / 180.0;
-  const n = Math.pow(2, zoom);
-  const x = Math.floor((lon + 180.0) / 360.0 * n);
-  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
-  return { x, y, z: zoom };
-}
-
-function tileSizeMeters(lat, zoom){
-  const R = 6378137.0;
-  const metersPerPixel = (Math.cos(lat * Math.PI / 180.0) * 2 * Math.PI * R) / (Math.pow(2, zoom) * 256.0);
-  return metersPerPixel * 256.0;
-}
-
-async function createStitchedTileTexture(template, z, cx, cy, gridSize){
-  const tilePx = 256;
-  const sizePx = gridSize * tilePx;
-  const canvas = document.createElement('canvas');
-  canvas.width = sizePx; canvas.height = sizePx;
-  const ctx = canvas.getContext('2d');
-  const half = Math.floor(gridSize/2);
-  const promises = [];
-  for (let dy = -half; dy <= half; dy++){
-    for (let dx = -half; dx <= half; dx++){
-      const tx = cx + dx, ty = cy + dy;
-      const url = template.replace('{z}', z).replace('{x}', tx).replace('{y}', ty);
-      promises.push(drawTileToCanvas(url, ctx, (dx+half)*tilePx, (dy+half)*tilePx));
+    } else if (g.type === "MultiPolygon") {
+      for (const poly of g.coordinates) {
+        const obj = geoPolygon(poly, cx, cy);
+        if (obj) group.add(obj);
+      }
     }
   }
-  // wait all; if any tile fails, promise will reject => caller will handle
-  await Promise.all(promises);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.encoding = THREE.sRGBEncoding;
+
+  scene.add(group);
+  placedObjects.push(group);
+}
+
+// ------------------------------------------
+function geoPolygon(poly, cx, cy) {
+  const ring = poly[0];
+  if (!ring) return null;
+
+  const pts = ring.map(r => {
+    const p = lonLatToPosition(r[0], r[1], cx, cy);
+    return new THREE.Vector3(p.x, 0.05, p.z);
+  });
+
+  const geom = new THREE.BufferGeometry().setFromPoints(pts);
+  const line = new THREE.LineLoop(
+    geom,
+    new THREE.LineBasicMaterial({ color: 0x00ff00 })
+  );
+
+  return line;
+}
+
+// =========================================
+// タイル処理
+// =========================================
+function lonLatToTile(lon, lat, zoom) {
+  const latRad = lat * Math.PI / 180;
+  const n = 2 ** zoom;
+  const x = Math.floor((lon + 180) / 360 * n);
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+
+function tileSizeMeters(lat, zoom) {
+  const R = 6378137.0;
+  const mpp = Math.cos(lat * Math.PI/180) * 2 * Math.PI * R / (2**zoom * 256);
+  return mpp * 256;
+}
+
+async function createStitchedTileTexture(tmpl, z, cx, cy, grid) {
+  const tilePx = 256;
+  const size = grid * tilePx;
+
+  const cvs = document.createElement("canvas");
+  cvs.width = size;
+  cvs.height = size;
+  const ctx = cvs.getContext("2d");
+
+  const half = Math.floor(grid/2);
+  const ps = [];
+
+  for (let dy=-half; dy<=half; dy++) {
+    for (let dx=-half; dx<=half; dx++) {
+      const x = cx + dx;
+      const y = cy + dy;
+      const url = tmpl
+        .replace("{z}", z)
+        .replace("{x}", x)
+        .replace("{y}", y);
+
+      ps.push(new Promise((res, rej) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          ctx.drawImage(img,
+            (dx+half)*tilePx,
+            (dy+half)*tilePx);
+          res();
+        };
+        img.onerror = () => rej(new Error("タイル取得失敗: " + url));
+        img.src = url;
+      }));
+    }
+  }
+
+  await Promise.all(ps);
+
+  const tex = new THREE.CanvasTexture(cvs);
   tex.needsUpdate = true;
   return tex;
 }
 
-function drawTileToCanvas(url, ctx, dx, dy){
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      try { ctx.drawImage(img, dx, dy); resolve(); } catch(e){ reject(e); }
-    };
-    img.onerror = (e) => reject(new Error('タイルロード失敗: ' + url));
-    img.src = url;
-  });
-}
-
-/* -------------------- ユーティリティ -------------------- */
-function clearPlacedObjects(){
-  for (const o of placedObjects) scene.remove(o);
+// =========================================
+// 配置削除
+// =========================================
+document.getElementById("clear-all").onclick = () => {
+  placedObjects.forEach(o => scene.remove(o));
   placedObjects = [];
-  statusEl.textContent = '状態: 配置をクリアしました';
-}
-async function getCurrentPosition(options){
-  return new Promise((res, rej) => {
-    if (!navigator.geolocation) return rej(new Error('Geolocation unsupported'));
-    navigator.geolocation.getCurrentPosition(res, rej, options);
-  });
-}
-
-/* Expose debug helper */
-window._ar = { clearPlacedObjects };
-
-/* EOF */
+  statusEl.textContent = "状態: クリア完了";
+};
 </script>
+
 </body>
 </html>
