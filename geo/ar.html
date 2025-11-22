@@ -5,8 +5,8 @@
 <title>AR 古地図 + 行政界 — 完成版 (Three.js r128)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/vconsole/dist/vconsole.min.js"></script>
-
+<script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+<script>eruda.init();</script>
   <style>
   html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
   canvas{display:block;width:100%;height:100%}
@@ -66,7 +66,7 @@
   <div id="status">状態: 待機</div>
 
 <script>
-const vConsole = new VConsole();
+
 /* 完成版：ARで古地図(全国)をジオ参照配置 + 行政界を重ねる
    - three.js r0.128 を使用
    - dom-overlay を有効にして AR 中も UI を操作可能
