@@ -1,86 +1,81 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <title>Simple WebXR AR — Three.js r128</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
+  <meta charset="utf-8" />
+  <title>AR 古地図 + 行政界デモ — three.js r128</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
   <style>
-    html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif}
-    #overlay {
-      position: absolute;
-      left: 12px;
-      top: 12px;
-      z-index: 10;
-      display:flex;
-      gap:8px;
-      align-items:center;
-    }
-    button {
-      background:#1976d2;color:white;border:none;padding:10px 14px;border-radius:8px;font-size:15px;
-      box-shadow:0 2px 8px rgba(0,0,0,0.2);
-    }
-    #message {
-      background: rgba(0,0,0,0.6);
-      color: white;
-      padding:8px 10px;
-      border-radius:8px;
-      font-size:13px;
-    }
-    #info {
-      position:absolute;
-      left:12px;
-      bottom:12px;
-      z-index:10;
-      background: rgba(0,0,0,0.6);
-      color:white;padding:10px;border-radius:8px;max-width:320px;font-size:13px;
-    }
+    html,body { height:100%; margin:0; font-family:system-ui, -apple-system, "Noto Sans JP", sans-serif; background:#000; }
+    #overlay { position:absolute; left:12px; top:12px; z-index:20; display:flex; gap:8px; align-items:center; }
+    button { background:#1976d2; color:#fff; border:none; padding:10px 12px; border-radius:8px; font-size:14px; box-shadow:0 4px 12px rgba(0,0,0,0.3); }
+    #msg { background:rgba(0,0,0,0.6); color:#fff; padding:8px 10px; border-radius:8px; font-size:13px; }
+    #info { position:absolute; left:12px; bottom:12px; z-index:20; background:rgba(0,0,0,0.6); color:#fff; padding:10px; border-radius:8px; max-width:360px; font-size:13px; }
     canvas { width:100%; height:100%; display:block; }
-    /* reticle ring style is from three meshes; no CSS needed */
   </style>
 </head>
 <body>
-  <!-- three.js (user requested version) -->
+  <!-- user requested three.js version -->
   <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 
   <div id="overlay">
-    <button id="start-ar">AR を開始</button>
-    <div id="message">対応ブラウザで実行してください</div>
+    <button id="startArBtn">AR 起動</button>
+    <button id="placeMapBtn" disabled>ここに古地図配置（タップでも可）</button>
+    <div id="msg">対応ブラウザで実行してください</div>
   </div>
-
   <div id="info">
-    使い方：① 「AR を開始」を押す → ② カメラ位置が決まったら画面をタップ／トリガーでオブジェクトを配置。<br>
-    注：端末とブラウザの WebXR/AR 対応が必要です（Android Chrome 等）。iOS Safari は WebXR 非対応です。
+    使い方：AR を起動 → レティクル（青いリング）が出たら画面をタップして配置。<br>
+    ※ このサンプルは「位置情報を取得して簡易的に緯度経度とマップタイルを対応づける」デモです。高精度な屋外位置合わせは別実装が必要です。
   </div>
 
   <script>
-  // Basic Three.js scene
+  // ========== 設定（必要ならここを変更） ==========
+  // 古地図タイル（国土地理院 旧地図タイル想定）
+  // 例: https://cyberjapandata.gsi.go.jp/xyz/oldmap/{z}/{x}/{y}.png
+  // （もし取得できない場合は、自サーバーにタイルを置くか URL を変更してください）
+  const OLD_MAP_TILE_URL = 'https://cyberjapandata.gsi.go.jp/xyz/oldmap/{z}/{x}/{y}.png';
+
+  // 行政界（GeoJSON） — デモでは geolonia の日本境界を想定した raw URL
+  // （動かない場合は geojson を自ホストへ置いてください）
+  const ADMIN_GEOJSON_URL = 'https://raw.githubusercontent.com/geolonia/japanese-admin-boundaries/master/geojson/japan.geojson';
+
+  // マップタイルのズーム（適宜調整）
+  const MAP_TILE_ZOOM = 16;
+
+  // 大きさ（表示するタイルの実スケール：1タイル = approx tileSizeMeters m）
+  const TILE_SIZE_METERS = 100; // デモ用。1タイルをおよそ何メートルとして配置するか
+
+  // ================================================
+
   let scene, camera, renderer;
-  let reticle; // placement preview
+  let reticle;
   let hitTestSource = null;
   let hitTestSourceRequested = false;
   let xrRefSpace = null;
-  let placedObjects = [];
+  let lastFrame = null;
+  let userLocation = null; // {lat, lon}
+  let placedAnchors = [];
 
   initThree();
+
   function initThree(){
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
     renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // simple light
-    const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(1, 2, 1);
-    scene.add(light);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 0.3));
+    const hemi = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 0.8);
+    scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+    dir.position.set(1,2,1);
+    scene.add(dir);
 
-    // Reticle (ring)
-    const ringGeom = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
-    const ringMat = new THREE.MeshBasicMaterial({color:0x00ffff, side:THREE.DoubleSide});
-    reticle = new THREE.Mesh(ringGeom, ringMat);
+    // Reticle ring
+    const ring = new THREE.RingGeometry(0.06, 0.09, 32).rotateX(-Math.PI/2);
+    const ringMat = new THREE.MeshBasicMaterial({color:0x00aaff, side:THREE.DoubleSide});
+    reticle = new THREE.Mesh(ring, ringMat);
     reticle.matrixAutoUpdate = false;
     reticle.visible = false;
     scene.add(reticle);
@@ -94,120 +89,91 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  // Create a sample object to place (a colored cube with a marker)
-  function createPlacedObject(){
-    const group = new THREE.Group();
+  // UI
+  const startArBtn = document.getElementById('startArBtn');
+  const placeMapBtn = document.getElementById('placeMapBtn');
+  const msgEl = document.getElementById('msg');
 
-    const geo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
-    const mat = new THREE.MeshStandardMaterial({color:0xff6f61, metalness:0.3, roughness:0.6});
-    const box = new THREE.Mesh(geo, mat);
-    box.position.y = 0.06; // lift above the ground so base sits on floor
-    group.add(box);
-
-    // small arrow / marker on top
-    const coneGeo = new THREE.ConeGeometry(0.03, 0.06, 16);
-    const cone = new THREE.Mesh(coneGeo, new THREE.MeshStandardMaterial({color:0xffffff}));
-    cone.position.set(0, 0.18, 0);
-    group.add(cone);
-
-    return group;
-  }
-
-  // Start AR session
-  const startButton = document.getElementById('start-ar');
-  const message = document.getElementById('message');
-  startButton.addEventListener('click', startAR);
+  startArBtn.addEventListener('click', startAR);
+  placeMapBtn.addEventListener('click', () => {
+    // emulate select: place at current reticle
+    placeMapAtReticle();
+  });
 
   async function startAR(){
-    if (navigator.xr === undefined) {
-      message.textContent = 'このブラウザは WebXR をサポートしていません';
+    if (!navigator.xr) {
+      msgEl.textContent = 'このブラウザは WebXR をサポートしていません';
       return;
+    }
+    // request permission for geolocation early (ユーザが許可する必要あり)
+    try {
+      await getUserLocation();
+    } catch(e){
+      console.warn('位置情報取得に失敗:', e);
+      // 位置が取れなくても AR は起動できるが、地図の緯度変換ができません
     }
 
     try {
-      const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
-      if (!isSupported) {
-        message.textContent = '端末/ブラウザが AR をサポートしていません';
+      const supported = await navigator.xr.isSessionSupported('immersive-ar');
+      if (!supported) {
+        msgEl.textContent = '端末/ブラウザが AR をサポートしていません';
         return;
       }
-    } catch(err) {
-      message.textContent = 'isSessionSupported の確認でエラー: ' + err.message;
-      return;
+    } catch(e){
+      console.warn('isSessionSupported error', e);
     }
 
     const sessionInit = {
-      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'anchors', 'hit-test', 'dom-overlay'],
-      // domOverlay can be helpful to show HTML overlay during AR; requires domOverlay.root set below
+      optionalFeatures: ['local-floor','hit-test','anchors','dom-overlay'],
       domOverlay: { root: document.body }
     };
 
     try {
       const session = await navigator.xr.requestSession('immersive-ar', sessionInit);
       onSessionStarted(session);
-    } catch(err) {
-      message.textContent = 'セッション開始に失敗: ' + err.message;
+    } catch(e){
+      msgEl.textContent = 'AR セッション開始に失敗: ' + e.message;
+      console.error(e);
     }
   }
 
   async function onSessionStarted(session){
-    // Attach renderer to XR session
     renderer.xr.setSession(session);
 
-    // Reference space for placing objects
-    xrRefSpace = await session.requestReferenceSpace('local-floor').catch(async () => {
-      return session.requestReferenceSpace('local');
-    });
+    xrRefSpace = await session.requestReferenceSpace('local-floor').catch(()=> session.requestReferenceSpace('local'));
 
-    // hit test source setup will be done in render loop when frame is available
-    hitTestSourceRequested = false;
-    placedObjects = [];
-
-    // select event for input (tap / controller trigger)
+    // listen select event (tap)
     session.addEventListener('select', onSelect);
 
-    renderer.setAnimationLoop(function (timestamp, frame) {
+    // rendering loop
+    renderer.setAnimationLoop((time, frame) => {
+      lastFrame = {time, frame};
+
       if (frame) {
         const session = frame.session;
-
-        // Request hit test source once per session
         if (!hitTestSourceRequested) {
-          const viewerRefSpace = session.requestReferenceSpace('viewer');
-          Promise.resolve(viewerRefSpace).then((vr) => {
-            vr.then?.( ()=>{} ); // no-op; older devices may return directly
-          }).catch(()=>{ /* ignore */ });
-
           session.requestReferenceSpace('viewer').then((viewerSpace) => {
             session.requestHitTestSource({space: viewerSpace}).then((source) => {
               hitTestSource = source;
-            }).catch((err) => {
-              // some browsers may not support requestHitTestSource; ignore
-              console.warn('requestHitTestSource failed', err);
-            });
-          }).catch((err) => {
-            console.warn('viewer reference space not available: ', err);
+            }).catch((err) => console.warn('requestHitTestSource failed', err));
           });
-
-          // If anchors are supported we could create anchors; here we rely on scene objects + hit-test poses
           hitTestSourceRequested = true;
 
-          // When session ends, cleanup
           session.addEventListener('end', () => {
             hitTestSourceRequested = false;
             hitTestSource = null;
             renderer.setAnimationLoop(null);
             reticle.visible = false;
-            message.textContent = 'セッションが終了しました';
+            msgEl.textContent = 'セッション終了';
           });
         }
 
-        // Do hit test each frame to position reticle
         if (hitTestSource) {
-          const hitTestResults = frame.getHitTestResults(hitTestSource);
-          if (hitTestResults.length > 0) {
-            const hit = hitTestResults[0];
+          const hitResults = frame.getHitTestResults(hitTestSource);
+          if (hitResults.length > 0) {
+            const hit = hitResults[0];
             const pose = hit.getPose(xrRefSpace);
             if (pose) {
-              // update reticle matrix
               reticle.visible = true;
               reticle.matrix.fromArray(pose.transform.matrix);
             } else {
@@ -222,47 +188,236 @@
       renderer.render(scene, camera);
     });
 
-    message.textContent = 'AR セッション中：画面をタップしてオブジェクトを配置';
+    msgEl.textContent = 'AR セッション中 — レティクルが見える位置をタップして配置';
+    placeMapBtn.disabled = false;
   }
 
-  // When user taps (select), place object at reticle's pose
-  function onSelect(event){
+  // handle tap (select)
+  function onSelect(evt){
+    // place at reticle
+    placeMapAtReticle();
+  }
+
+  // ========== geolocation helper ==========
+  function getUserLocation(){
+    return new Promise((resolve, reject) => {
+      if (!('geolocation' in navigator)) {
+        reject(new Error('Geolocation unsupported'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition((pos) => {
+        userLocation = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        resolve(userLocation);
+      }, (err) => {
+        reject(err);
+      }, { enableHighAccuracy:true, maximumAge:60*1000, timeout:5000 });
+    });
+  }
+
+  // ========== utility: lat/lon <-> meter offset ==========
+  // Approximations (WGS84 spherical approx). Good for small distances (< few km).
+  const EARTH_RADIUS = 6378137; // meters
+  function metersToLat(m){
+    return (m / EARTH_RADIUS) * (180 / Math.PI);
+  }
+  function metersToLon(m, lat){
+    return (m / (EARTH_RADIUS * Math.cos(lat * Math.PI / 180))) * (180 / Math.PI);
+  }
+  function latToMetersDelta(latDelta){
+    return (latDelta * Math.PI / 180) * EARTH_RADIUS;
+  }
+  function lonToMetersDelta(lonDelta, lat){
+    return (lonDelta * Math.PI / 180) * EARTH_RADIUS * Math.cos(lat * Math.PI / 180);
+  }
+
+  // ========== map tile helpers (Web Mercator) ==========
+  function latLonToTileXY(lat, lon, zoom){
+    const x = (lon + 180) / 360 * Math.pow(2, zoom);
+    const sinLat = Math.sin(lat * Math.PI / 180);
+    const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * Math.pow(2, zoom);
+    return { x: Math.floor(x), y: Math.floor(y) };
+  }
+  function tileUrlFor(lat, lon, zoom){
+    const t = latLonToTileXY(lat, lon, zoom);
+    return OLD_MAP_TILE_URL.replace('{z}', String(zoom)).replace('{x}', String(t.x)).replace('{y}', String(t.y));
+  }
+
+  // ========== core: place a map tile + admin borders where reticle is ==========
+  async function placeMapAtReticle(){
     if (!reticle.visible) {
-      // no valid placement
+      msgEl.textContent = 'まずは有効なレティクル位置を探してください';
       return;
     }
-    const placed = createPlacedObject();
-    // copy matrix from reticle
-    placed.matrixAutoUpdate = false;
-    placed.matrix.copy(reticle.matrix);
-    scene.add(placed);
-    placedObjects.push(placed);
 
-    // Optionally attempt to create an XRAnchor (if supported). This requires XRFrame.createAnchor in some implementations;
-    // but that API is not available in all browsers. Here we do a best-effort attempt:
+    if (!lastFrame || !lastFrame.frame) {
+      msgEl.textContent = 'フレーム情報がありません';
+      return;
+    }
+
+    // get pose of reticle in xrRefSpace (matrix already in reticle.matrix)
+    const matrix = new THREE.Matrix4();
+    matrix.copy(reticle.matrix);
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    matrix.decompose(pos, quat, scale);
+
+    // Convert AR-local offset (pos) to approximate lat/lon using userLocation as origin.
+    // ASSUMPTION: XR local coordinate axes align with ENU: +X = East, +Z = -North (common but not guaranteed).
+    // This is a simple demo; for production, calibrate orientation with device heading or other means.
+    if (!userLocation) {
+      try {
+        await getUserLocation();
+      } catch(e){
+        console.warn('位置取得できず: ', e);
+        msgEl.textContent = '位置情報が取れないため正確な地図配置ができません（許可が必要）';
+        return;
+      }
+    }
+
+    // interpret pos.x as east (meters), pos.z as -north (meters) because WebXR z is negative forward
+    const eastMeters = pos.x;
+    const northMeters = -pos.z;
+    const placedLat = userLocation.lat + metersToLat(northMeters);
+    const placedLon = userLocation.lon + metersToLon(eastMeters, userLocation.lat);
+
+    msgEl.textContent = `配置位置推定: lat=${placedLat.toFixed(6)} lon=${placedLon.toFixed(6)}`;
+
+    // create a group at the reticle transform so it stays in place
+    const group = new THREE.Group();
+    group.matrixAutoUpdate = false;
+    group.matrix.copy(reticle.matrix); // place group exactly at reticle (world)
+    scene.add(group);
+    placedAnchors.push(group);
+
+    // 1) 古地図タイルを取得して plane に貼る
+    const tileUrl = tileUrlFor(placedLat, placedLon, MAP_TILE_ZOOM);
     try {
-      const session = renderer.xr.getSession();
-      // create anchor from hit test result would need frame; since we don't have frame here,
-      // many apps set a flag and create anchor in the next animation frame with the stored pose.
-      // For simplicity, we rely on the placed THREE.Object3D staying in the scene.
+      const texture = await loadTextureAsync(tileUrl);
+      // plane size based on TILE_SIZE_METERS
+      const planeGeo = new THREE.PlaneGeometry(TILE_SIZE_METERS, TILE_SIZE_METERS);
+      // rotate to horizontal
+      planeGeo.rotateX(-Math.PI/2);
+      const mat = new THREE.MeshStandardMaterial({ map: texture, transparent: true, opacity: 0.98, side: THREE.DoubleSide });
+      const plane = new THREE.Mesh(planeGeo, mat);
+      // center the tile at the group's origin
+      plane.position.set(0, 0.01, 0); // slightly above ground to avoid z-fighting
+      group.add(plane);
+    } catch (err) {
+      console.warn('タイル取得失敗:', tileUrl, err);
+      msgEl.textContent = 'タイルの取得に失敗しました（CORS / URL を確認）';
+    }
+
+    // 2) 行政界 GeoJSON を取得して、配置中心を基準にローカル座標で線を描く
+    try {
+      const geojson = await fetchGeoJSON(ADMIN_GEOJSON_URL);
+      // We will draw only polygons that intersect roughly with placed lat/lon by bbox test for performance
+      drawAdminBoundariesAtGroup(geojson, placedLat, placedLon, group);
     } catch (e) {
-      // ignore
+      console.warn('GeoJSON取得失敗', e);
+      // graceful continue
+    }
+
+    // put a small marker at center
+    const markerGeo = new THREE.ConeGeometry(0.03, 0.08, 12);
+    const markerMat = new THREE.MeshStandardMaterial({color:0xffdd33});
+    const marker = new THREE.Mesh(markerGeo, markerMat);
+    marker.position.set(0, 0.06, 0);
+    marker.rotateX(Math.PI);
+    group.add(marker);
+  }
+
+  // ========== helpers: load texture and geojson ==========
+  function loadTextureAsync(url){
+    return new Promise((resolve, reject) => {
+      const loader = new THREE.TextureLoader();
+      loader.crossOrigin = ''; // attempt CORS
+      loader.load(url, (tex) => {
+        // set reasonable filtering for non-power-of-two tiles
+        tex.minFilter = THREE.LinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        resolve(tex);
+      }, undefined, (err) => {
+        reject(err);
+      });
+    });
+  }
+
+  async function fetchGeoJSON(url){
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('geojson fetch failed: ' + res.status);
+    return await res.json();
+  }
+
+  // ========== draw admin boundaries ==========
+  function drawAdminBoundariesAtGroup(geojson, centerLat, centerLon, group){
+    // For each feature, iterate coordinates and create line segments within a certain radius
+    const maxMeters = TILE_SIZE_METERS * 2; // only draw features within ~2 tiles
+    const centerLatRad = centerLat * Math.PI / 180;
+
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ffcc, linewidth: 2 });
+
+    // helper: convert lat/lon -> local meters relative to center
+    function latLonToLocalMeters(lat, lon){
+      const dy = latToMetersDelta(lat - centerLat);
+      const dx = lonToMetersDelta(lon - centerLon, centerLat);
+      // in AR space: +X east, +Z south (we used earlier northMeters = -pos.z)
+      // We want +X = east, +Z = -north, so convert north->-z
+      return new THREE.Vector3(dx, 0, -dy);
+    }
+
+    const features = geojson.features || [];
+    for (const f of features){
+      // quick bbox check if available to avoid drawing huge topology
+      if (f.bbox) {
+        // compute c気 approximate center of bbox
+        const [minx, miny, maxx, maxy] = f.bbox;
+        const midLat = (miny + maxy) / 2;
+        const midLon = (minx + maxx) / 2;
+        const dx = lonToMetersDelta(midLon - centerLon, centerLat);
+        const dy = latToMetersDelta(midLat - centerLat);
+        if (Math.abs(dx) > maxMeters * 2 || Math.abs(dy) > maxMeters * 2) continue; // skip
+      }
+
+      const geom = f.geometry;
+      if (!geom) continue;
+      if (geom.type === 'Polygon'){
+        for (const ring of geom.coordinates){
+          const pts = ring.map(([lon, lat]) => latLonToLocalMeters(lat, lon));
+          drawLineFromPoints(pts, lineMaterial, group);
+        }
+      } else if (geom.type === 'MultiPolygon'){
+        for (const poly of geom.coordinates){
+          for (const ring of poly){
+            const pts = ring.map(([lon, lat]) => latLonToLocalMeters(lat, lon));
+            drawLineFromPoints(pts, lineMaterial, group);
+          }
+        }
+      } else if (geom.type === 'LineString'){
+        const pts = geom.coordinates.map(([lon, lat]) => latLonToLocalMeters(lat, lon));
+        drawLineFromPoints(pts, lineMaterial, group);
+      } else if (geom.type === 'MultiLineString'){
+        for (const line of geom.coordinates){
+          const pts = line.map(([lon, lat]) => latLonToLocalMeters(lat, lon));
+          drawLineFromPoints(pts, lineMaterial, group);
+        }
+      }
     }
   }
 
-  // helper to remove all placed objects (debug)
-  function clearPlacedObjects(){
-    for (const o of placedObjects) {
-      scene.remove(o);
+  function drawLineFromPoints(pts, mat, group){
+    if (pts.length < 2) return;
+    const positions = new Float32Array(pts.length * 3);
+    for (let i=0;i<pts.length;i++){
+      positions[i*3 + 0] = pts[i].x;
+      positions[i*3 + 1] = pts[i].y + 0.02; // slightly above the plane
+      positions[i*3 + 2] = pts[i].z;
     }
-    placedObjects = [];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const line = new THREE.Line(geo, mat);
+    group.add(line);
   }
-
-  // Expose simple debug from console if desired
-  window._ar = {
-    clearPlacedObjects,
-    placedObjects
-  };
 
   </script>
 </body>
