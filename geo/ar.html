@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<title>AR 古地図 + 行政界 — 動作保証版</title>
+<title>AR 古地図 + 行政界 — 修正版（カメラ映像対応）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <!-- three.js r0.128 -->
 <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
@@ -40,7 +40,7 @@
 <body>
   <!-- UI used as DOM overlay root (important: not body) -->
   <div id="ui">
-    <div style="font-weight:700">AR 古地図 + 行政界（動作保証）</div>
+    <div style="font-weight:700">AR 古地図 + 行政界（修正版）</div>
 
     <button id="startAR">AR を開始</button>
 
@@ -70,12 +70,10 @@
 
 <script>
 /* ===========================
-   完全動作品：要点
-   - renderer: alpha:false, xrCompatible
-   - gl.makeXRCompatible() を await 実行
-   - session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) })
-   - domOverlay: root = #ui
-   - reference space: 'local'
+   修正版：カメラ映像黒画面対策
+   - renderer: alpha:true に変更
+   - 背景色を透明に設定
+   - セッション設定順序を修正
    =========================== */
 
 let scene, camera, renderer;
@@ -94,11 +92,19 @@ function initThree() {
 
   camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
 
-  // IMPORTANT: alpha:false and xrCompatible true
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: false });
+  // 修正: alpha:true に変更して透明背景を許可
+  renderer = new THREE.WebGLRenderer({ 
+    antialias: true, 
+    alpha: true,  // ← 透明背景を許可
+    preserveDrawingBuffer: false,
+    powerPreference: 'high-performance'  // ← パフォーマンス優先
+  });
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
+  
+  // 背景色を透明に設定
+  renderer.setClearColor(0x000000, 0);
 
   // Append canvas (Three will create it)
   document.body.appendChild(renderer.domElement);
@@ -119,6 +125,7 @@ function initThree() {
 
   window.addEventListener('resize', onWindowResize, false);
 }
+
 function onWindowResize(){
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
@@ -151,24 +158,27 @@ async function startAR(){
       domOverlay: { root: document.getElementById('ui') }
     });
 
+    // 修正: Three.jsのセッションを先に設定
+    renderer.xr.setSession(session);
+
     // Ensure GL is XR-compatible
     const gl = renderer.getContext();
     if (gl.makeXRCompatible) {
       await gl.makeXRCompatible();
     }
 
-    // Create explicit XRWebGLLayer and set it on session (fixes many black-screen cases)
-    // Some environments require this explicit step.
+    // 修正: XRWebGLLayerの設定（Three.jsセッション設定後）
     try {
       const baseLayer = new XRWebGLLayer(session, gl);
-      session.updateRenderState({ baseLayer });
+      await session.updateRenderState({ 
+        baseLayer: baseLayer,
+        depthData: session.renderState.supportedDepthDataFormats ? 
+          session.renderState.supportedDepthDataFormats[0] : undefined
+      });
     } catch(e) {
       console.warn('XRWebGLLayer construction/update failed (may be fine):', e);
-      // continue — Three.js may set it later
+      // continue — Three.js may handle it
     }
-
-    // Set session to Three.js renderer AFTER baseLayer set
-    renderer.xr.setSession(session);
 
     // Use 'local' refspace for stability
     xrRefSpace = await session.requestReferenceSpace('local');
@@ -199,38 +209,42 @@ async function startAR(){
 
 /* ---------------- render loop ---------------- */
 function render(timestamp, frame){
-  // request hit test source once
-  if (frame) {
-    const session = frame.session;
-    if (!hitTestSourceRequested) {
-      session.requestReferenceSpace('viewer').then(viewerSpace => {
-        session.requestHitTestSource({ space: viewerSpace }).then(source => {
-          hitTestSource = source;
-        }).catch(e => {
-          console.warn('requestHitTestSource failed', e);
-        });
-      }).catch(e => console.warn('requestReferenceSpace(viewer) failed', e));
-      hitTestSourceRequested = true;
-    }
+  // 修正: frameがない場合は早期リターン
+  if (!frame) {
+    return;
+  }
 
-    // update reticle if hits
-    if (hitTestSource) {
-      const hitResults = frame.getHitTestResults(hitTestSource);
-      if (hitResults.length > 0) {
-        const pose = hitResults[0].getPose(xrRefSpace);
-        if (pose) {
-          const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
-          reticle.matrix.copy(m);
-          reticle.visible = true;
-          lastReticleMatrix = m.clone();
-        } else {
-          reticle.visible = false;
-          lastReticleMatrix = null;
-        }
+  const session = frame.session;
+  
+  // request hit test source once
+  if (!hitTestSourceRequested) {
+    session.requestReferenceSpace('viewer').then(viewerSpace => {
+      session.requestHitTestSource({ space: viewerSpace }).then(source => {
+        hitTestSource = source;
+      }).catch(e => {
+        console.warn('requestHitTestSource failed', e);
+      });
+    }).catch(e => console.warn('requestReferenceSpace(viewer) failed', e));
+    hitTestSourceRequested = true;
+  }
+
+  // update reticle if hits
+  if (hitTestSource) {
+    const hitResults = frame.getHitTestResults(hitTestSource);
+    if (hitResults.length > 0) {
+      const pose = hitResults[0].getPose(xrRefSpace);
+      if (pose) {
+        const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
+        reticle.matrix.copy(m);
+        reticle.visible = true;
+        lastReticleMatrix = m.clone();
       } else {
         reticle.visible = false;
         lastReticleMatrix = null;
       }
+    } else {
+      reticle.visible = false;
+      lastReticleMatrix = null;
     }
   }
 
